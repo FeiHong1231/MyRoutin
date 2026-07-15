@@ -7,6 +7,9 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -382,6 +385,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
         addRow(card, "套餐", usage.planName ?: "--")
         addRow(card, "类型/状态", "${usage.type ?: "--"} / ${usage.status ?: "--"}")
+        addRow(card, "开始时间", formatBeijingTime(usage.startAt))
+        addRow(card, "到期时间", formatBeijingTime(usage.endAt))
         val hasCycleUsage = usage.hasCycleUsage()
         val hasResourceUsage = usage.hasResourceUsage()
         if (hasCycleUsage) {
@@ -399,6 +404,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             card.addView(createText("暂无可展示额度", 14f, R.color.gray_727272, false))
         }
         addRow(card, "允许模型", usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString() ?: "--")
+        addRow(card, "分组倍率", formatGroupMultipliers(usage))
         llResult.addView(card)
     }
 
@@ -455,10 +461,17 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 jsonArray.optString(index).takeIf { it.isNotBlank() }
             }
         }.orEmpty()
+        val allowedGroups = jsonObject.optJSONArray("allowedGroups")?.let { jsonArray ->
+            (0 until jsonArray.length()).mapNotNull { index ->
+                jsonArray.optString(index).takeIf { it.isNotBlank() }
+            }
+        }.orEmpty()
         return PlanUsageSnapshot(
             planName = jsonObject.stringOrNull("planName"),
             type = jsonObject.intOrNull("type"),
             status = jsonObject.intOrNull("status"),
+            startAt = jsonObject.stringOrNull("startAt"),
+            endAt = jsonObject.stringOrNull("endAt"),
             dailyLimitUsd = jsonObject.doubleOrNull("dailyLimitUsd"),
             weeklyLimitUsd = jsonObject.doubleOrNull("weeklyLimitUsd"),
             dailyUsedUsd = jsonObject.doubleOrNull("dailyUsedUsd"),
@@ -470,7 +483,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
             totalTokens = jsonObject.longOrNull("totalTokens"),
             consumedTokens = jsonObject.longOrNull("consumedTokens"),
             remainingTokens = jsonObject.longOrNull("remainingTokens"),
-            allowedModels = allowedModels
+            allowedModels = allowedModels,
+            allowedGroups = allowedGroups,
+            groupNames = jsonObject.stringMapOrEmpty("groupNames"),
+            groupMultipliers = jsonObject.doubleMapOrEmpty("groupMultipliers")
         )
     }
 
@@ -512,7 +528,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
     }
 
-    private fun createText(textValue: String, textSizeSp: Float, colorId: Int, bold: Boolean): TextView {
+    private fun createText(textValue: CharSequence, textSizeSp: Float, colorId: Int, bold: Boolean): TextView {
         return TextView(this).apply {
             text = textValue
             textSize = textSizeSp
@@ -527,7 +543,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
     /**
      * 添加左右结构信息行，左侧字段名固定宽度便于快速扫读。
      */
-    private fun addRow(parent: LinearLayout, label: String, value: String) {
+    private fun addRow(parent: LinearLayout, label: String, value: CharSequence) {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             orientation = LinearLayout.HORIZONTAL
@@ -705,12 +721,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 前景填充根据预警状态切换渐变色：正常蓝青，超过 80% 或耗尽时橙红。
+     * 前景填充根据预警状态切换渐变色：正常蓝青，超过 80% 或耗尽时亮红到亮橙。
      * @param isWarning 是否使用预警渐变
      */
     private fun createProgressFillDrawable(isWarning: Boolean): GradientDrawable {
-        val startColor = if (isWarning) R.color.orange_fe5d36 else R.color.blue_2771fa
-        val endColor = if (isWarning) R.color.red_ff3b30 else R.color.teal_200
+        val startColor = if (isWarning) R.color.red_ff3b30 else R.color.blue_2771fa
+        val endColor = if (isWarning) R.color.orange_ff9f0a else R.color.teal_200
         return GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
             intArrayOf(getColorCompat(startColor), getColorCompat(endColor))
@@ -833,6 +849,71 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 按服务端允许分组顺序展示名称和倍率，缺少名称时回退分组 ID 便于排查。
+     * @param usage 当前 key 返回的用量快照
+     */
+    private fun formatGroupMultipliers(usage: PlanUsageSnapshot): CharSequence {
+        val groupIds = linkedSetOf<String>().apply {
+            addAll(usage.allowedGroups)
+            addAll(usage.groupMultipliers.keys)
+            addAll(usage.groupNames.keys)
+        }
+        if (groupIds.isEmpty()) {
+            return "--"
+        }
+        val greenRanges = mutableListOf<Pair<Int, Int>>()
+        val textBuilder = StringBuilder()
+        groupIds.forEachIndexed { index, groupId ->
+            if (index > 0) {
+                textBuilder.append("，")
+            }
+            val start = textBuilder.length
+            val groupName = usage.groupNames[groupId] ?: groupId
+            val multiplierValue = usage.groupMultipliers[groupId]
+            val multiplier = multiplierValue?.let { "x${usdFormatter.format(it)}" } ?: "x--"
+            textBuilder.append("$groupName $multiplier")
+            val end = textBuilder.length
+            if (isLowerThanDefaultGroupMultiplier(groupId, groupName, multiplierValue)) {
+                greenRanges.add(start to end)
+            }
+        }
+        return SpannableString(textBuilder).apply {
+            greenRanges.forEach { (start, end) ->
+                setSpan(
+                    ForegroundColorSpan(getColorCompat(R.color.green_34c759)),
+                    start,
+                    end,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+        }
+    }
+
+    /**
+     * 分组倍率低于默认基线时返回 true，用绿色提示用户当前分组更省。
+     * @param groupId 服务端返回的分组 ID
+     * @param groupName 服务端返回的分组名称
+     * @param multiplier 当前 key 对应的分组倍率
+     */
+    private fun isLowerThanDefaultGroupMultiplier(groupId: String, groupName: String, multiplier: Double?): Boolean {
+        val defaultMultiplier = resolveDefaultGroupMultiplier(groupId, groupName) ?: return false
+        return multiplier != null && multiplier < defaultMultiplier
+    }
+
+    /**
+     * 默认倍率基线来自当前套餐规则：Codex Pro 为 x2，Codex 为 x1。
+     * @param groupId 服务端返回的分组 ID
+     * @param groupName 服务端返回的分组名称
+     */
+    private fun resolveDefaultGroupMultiplier(groupId: String, groupName: String): Double? {
+        return when {
+            groupId == GROUP_ID_CODEX_PRO || groupName == GROUP_NAME_CODEX_PRO -> DEFAULT_CODEX_PRO_GROUP_MULTIPLIER
+            groupId == GROUP_ID_CODEX || groupName == GROUP_NAME_CODEX -> DEFAULT_CODEX_GROUP_MULTIPLIER
+            else -> null
+        }
+    }
+
     private fun formatPercent(usedRate: Double?): String {
         return usedRate?.let { "${percentFormatter.format(it * 100)}%" } ?: "--"
     }
@@ -874,12 +955,48 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 页面展示层使用的用量快照，只保留本次需要查看的额度和 token 字段。
+     * 将接口返回的 ID 到名称对象转为 Map，避免页面直接依赖 JSONObject。
+     * @param name JSON 对象字段名
+     */
+    private fun JSONObject.stringMapOrEmpty(name: String): Map<String, String> {
+        val mapObject = optJSONObject(name) ?: return emptyMap()
+        val result = linkedMapOf<String, String>()
+        val keys = mapObject.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            mapObject.stringOrNull(key)?.let { value ->
+                result[key] = value
+            }
+        }
+        return result
+    }
+
+    /**
+     * 将接口返回的 ID 到倍率对象转为 Map，保留分组倍率的原始数值。
+     * @param name JSON 对象字段名
+     */
+    private fun JSONObject.doubleMapOrEmpty(name: String): Map<String, Double> {
+        val mapObject = optJSONObject(name) ?: return emptyMap()
+        val result = linkedMapOf<String, Double>()
+        val keys = mapObject.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            mapObject.doubleOrNull(key)?.let { value ->
+                result[key] = value
+            }
+        }
+        return result
+    }
+
+    /**
+     * 页面展示层使用的用量快照，只保留本次需要查看的额度、周期和分组倍率字段。
      */
     data class PlanUsageSnapshot(
         val planName: String?,
         val type: Int?,
         val status: Int?,
+        val startAt: String?,
+        val endAt: String?,
         val dailyLimitUsd: Double?,
         val weeklyLimitUsd: Double?,
         val dailyUsedUsd: Double?,
@@ -891,7 +1008,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
         val totalTokens: Long?,
         val consumedTokens: Long?,
         val remainingTokens: Long?,
-        val allowedModels: List<String>
+        val allowedModels: List<String>,
+        val allowedGroups: List<String>,
+        val groupNames: Map<String, String>,
+        val groupMultipliers: Map<String, Double>
     ) {
         /**
          * 资源包套餐以 token 字段为主，只要任一 token 额度字段有有效值就展示资源包区块。
@@ -928,6 +1048,15 @@ class PlanUsageInputActivity : AppCompatActivity() {
         private const val PREF_KEY_API_KEY = "api_key"
         private const val PREF_KEY_DAY_WINDOW_END_AT = "day_window_end_at"
         private const val PREF_KEY_WEEK_WINDOW_END_AT = "week_window_end_at"
+        /**
+         * 分组默认倍率基线，用于判断接口返回倍率是否低于常规值。
+         */
+        private const val GROUP_ID_CODEX_PRO = "ffa027fc-8402-4b99-8db2-66eefc87325f"
+        private const val GROUP_ID_CODEX = "ffa2f93c-6a1f-4bbd-a968-632ae3654465"
+        private const val GROUP_NAME_CODEX_PRO = "Codex Pro"
+        private const val GROUP_NAME_CODEX = "Codex"
+        private const val DEFAULT_CODEX_PRO_GROUP_MULTIPLIER = 2.0
+        private const val DEFAULT_CODEX_GROUP_MULTIPLIER = 1.0
         private val BEIJING_TIME_ZONE = TimeZone.getTimeZone("Asia/Shanghai")
         private val BEIJING_TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).apply {
             timeZone = BEIJING_TIME_ZONE

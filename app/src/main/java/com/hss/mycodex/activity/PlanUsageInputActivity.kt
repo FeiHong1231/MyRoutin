@@ -195,7 +195,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             btnAddKey = Button(this@PlanUsageInputActivity).apply {
                 text = "添加 Key"
                 isAllCaps = false
-                setOnClickListener { showAddKeyPanel() }
+                setOnClickListener { toggleAddKeyPanel() }
                 layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
                     marginEnd = 6.dp
                 }
@@ -319,6 +319,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
         tvRefreshStatus.visibility = if (tvRefreshStatus.text.isNullOrBlank()) View.GONE else View.VISIBLE
         btnAddKey.isEnabled = !isRefreshingAll
+        btnAddKey.text = if (isAddKeyPanelVisible) "收起" else "添加 Key"
         btnRefreshAll.isEnabled = savedPlanKeys.isNotEmpty() && !isRefreshingAll
         btnRefreshAll.text = if (isRefreshingAll) "刷新中..." else "刷新全部"
         btnQueryAndAdd.isEnabled = !isAddingKey && !isRefreshingAll
@@ -331,15 +332,20 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 添加入口始终保留用户已输入的内容，避免收起面板时误清空尚未验证的新 Key。
+     * 添加入口可展开或收起，收起时保留用户已输入内容，避免误点后丢失尚未验证的新 Key。
      */
-    private fun showAddKeyPanel() {
+    private fun toggleAddKeyPanel() {
         if (isRefreshingAll) {
             return
         }
-        isAddKeyPanelVisible = true
+        isAddKeyPanelVisible = !isAddKeyPanelVisible
+        if (!isAddKeyPanelVisible) {
+            hideKeyboard()
+        }
         renderPage()
-        etApiKey.requestFocus()
+        if (isAddKeyPanelVisible) {
+            etApiKey.requestFocus()
+        }
     }
 
     /**

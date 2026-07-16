@@ -15,7 +15,6 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
@@ -44,7 +43,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-import kotlin.math.roundToInt
 
 /**
  * 说明：订阅 Key 用量查询页，支持本地保存多个 Key 并集中查看额度。
@@ -984,13 +982,20 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 创建圆角渐变进度条；非零小额用量至少保留一个完整胶囊宽度，避免圆角在窄填充时变形。
+     * 创建圆角渐变进度条；用权重模拟进度，保证小额消耗也能保留可见宽度。
      * @param usedRate 当前已用比例
      * @param isWarning 是否超过预警线或已耗尽
      */
     private fun createUsageProgressBar(usedRate: Double?, isWarning: Boolean): View {
         val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        return FrameLayout(this).apply {
+        val progressWeight = if (progressRate <= 0f) {
+            0f
+        } else {
+            (progressRate * PROGRESS_WEIGHT_TOTAL).coerceAtLeast(1f)
+        }
+        val remainingWeight = (PROGRESS_WEIGHT_TOTAL - progressWeight).coerceAtLeast(0f)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             background = createProgressBackgroundDrawable()
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -998,25 +1003,24 @@ class PlanUsageInputActivity : AppCompatActivity() {
             ).apply {
                 topMargin = 6.dp
             }
-            if (progressRate <= 0f) {
-                return@apply
-            }
-            val progressView = View(this@PlanUsageInputActivity).apply {
-                background = createProgressFillDrawable(isWarning)
-            }
-            addView(progressView)
-            addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
-                val containerWidth = right - left
-                val actualWidth = (containerWidth * progressRate).roundToInt()
-                val progressWidth = actualWidth
-                    .coerceAtLeast(PROGRESS_MIN_VISIBLE_WIDTH_DP.dp)
-                    .coerceAtMost(containerWidth)
-                if (progressView.layoutParams.width != progressWidth) {
-                    progressView.layoutParams = FrameLayout.LayoutParams(
-                        progressWidth,
-                        ViewGroup.LayoutParams.MATCH_PARENT
+            if (progressWeight > 0f) {
+                addView(View(this@PlanUsageInputActivity).apply {
+                    background = createProgressFillDrawable(isWarning)
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        progressWeight
                     )
-                }
+                })
+            }
+            if (remainingWeight > 0f) {
+                addView(View(this@PlanUsageInputActivity).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        remainingWeight
+                    )
+                })
             }
         }
     }
@@ -1282,7 +1286,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
     companion object {
         private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
-        private const val PROGRESS_MIN_VISIBLE_WIDTH_DP = 8
+        private const val PROGRESS_WEIGHT_TOTAL = 1000f
         private const val MENU_PIN = 1
         private const val MENU_RENAME = 2
         private const val MENU_DELETE = 3

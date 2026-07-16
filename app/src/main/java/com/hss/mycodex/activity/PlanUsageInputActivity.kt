@@ -2,7 +2,6 @@ package com.hss.mycodex.activity
 
 import android.content.Context
 import android.content.ClipboardManager
-import android.content.SharedPreferences
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -16,13 +15,20 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.updateLayoutParams
-import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.hss.mycodex.R
+import com.hss.mycodex.adapter.PlanUsageKeyAdapter
+import com.hss.mycodex.model.PlanUsageSnapshot
+import com.hss.mycodex.model.SavedPlanKey
+import com.hss.mycodex.store.PlanUsageKeyStore
 import com.hss.mycodex.widget.MyToastD
 import com.hss.mycodex.widget.dp
 import kotlinx.coroutines.Dispatchers
@@ -34,111 +40,228 @@ import java.net.URL
 import java.text.DateFormat
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
- * 说明：手动输入订阅 key 的用量查询页，key 保存到本地 SP，便于反复刷新查看额度。
+ * 说明：订阅 Key 用量查询页，支持本地保存多个 Key 并集中查看额度。
  *
  * @作者 huangssh
- * @版本 1.0
+ * @版本 1.1
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 
-    private lateinit var etApiKey: EditText
-    private lateinit var llActionRow: LinearLayout
     /**
-     * 输入模式下从剪贴板填充 key 的按钮，与重置按钮互斥展示。
+     * 添加 Key 时使用的名称与 Key 输入框，仅在添加面板展开时显示。
+     */
+    private lateinit var etKeyName: EditText
+    private lateinit var etApiKey: EditText
+    private lateinit var llAddKeyPanel: LinearLayout
+    private lateinit var tvKeyCount: TextView
+    private lateinit var tvRefreshStatus: TextView
+    private lateinit var tvEmptyHint: TextView
+    private lateinit var btnAddKey: Button
+    private lateinit var btnRefreshAll: Button
+    /**
+     * 添加面板内从剪贴板填充 Key 的快捷入口。
      */
     private lateinit var btnPasteKey: Button
-    private lateinit var btnResetKey: Button
-    private lateinit var btnRefreshPage: Button
-    private lateinit var llResult: LinearLayout
+    private lateinit var btnQueryAndAdd: Button
+    private lateinit var rvPlanKeys: RecyclerView
     private val usdFormatter = DecimalFormat("0.##")
     private val percentFormatter = DecimalFormat("0.#")
     private val tokenFormatter = DecimalFormat("#,###")
 
     /**
-     * 保存用户手动输入的订阅 key 和最近一次成功返回的窗口结束时间。
+     * 本地存储负责迁移旧单 Key 数据，并保存多 Key 的卡片状态和查询缓存。
      */
-    private val planUsagePrefs: SharedPreferences by lazy {
-        getSharedPreferences(PLAN_USAGE_INPUT_PREFS_NAME, Context.MODE_PRIVATE)
-    }
+    private val planUsageKeyStore by lazy { PlanUsageKeyStore(this) }
+
+    /**
+     * 内存中的全部 Key 是页面唯一数据源；展示时再按置顶状态和创建时间排序。
+     */
+    private val savedPlanKeys = mutableListOf<SavedPlanKey>()
+
+    /**
+     * 请求进度和错误提示只服务于当前页面会话，避免短暂的刷新状态在下次启动时误导用户。
+     */
+    private val refreshingKeyIds = mutableSetOf<String>()
+    private val latestErrorByKeyId = mutableMapOf<String, String>()
+    private lateinit var planUsageKeyAdapter: PlanUsageKeyAdapter
+    private var isAddKeyPanelVisible = false
+    private var isAddingKey = false
+    private var isRefreshingAll = false
+    private var refreshCurrentIndex = 0
+    private var refreshTotalCount = 0
+    private var refreshStatusText: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = "订阅 Key 查询"
+        savedPlanKeys.addAll(planUsageKeyStore.loadKeys())
+        isAddKeyPanelVisible = savedPlanKeys.isEmpty()
         setContentView(createContentView())
-        val savedApiKey = getSavedApiKey()
-        etApiKey.setText(savedApiKey)
-        if (savedApiKey.isBlank()) {
-            showInputMode()
-            renderEmptyPrompt()
-        } else {
-            showSavedKeyMode()
-            loadPlanUsage(savedApiKey)
-        }
+        renderPage()
     }
 
     /**
-     * 页面直接用代码生成，保持和参考项目一样的本地工具页形态。
+     * 页面顶部固定管理入口，Key 卡片交给 RecyclerView 滚动，避免多项展开时页面操作区被挤走。
      */
     private fun createContentView(): View {
-        val scrollView = NestedScrollView(this).apply {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(getColorCompat(R.color.white_f5f6fa))
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
-        val container = LinearLayout(this).apply {
+        val header = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16.dp, 16.dp, 16.dp, 16.dp)
+            setPadding(16.dp, 16.dp, 16.dp, 8.dp)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-//        container.addView(createText("订阅 Key 查询", 24f, R.color.gray_212121, true))
-        etApiKey = EditText(this).apply {
-            hint = "请输入 plan- 开头的 apikey"
-            isSingleLine = true
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            setSelectAllOnFocus(true)
-            setPadding(12.dp, 0, 12.dp, 0)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                48.dp
-            )
-        }
-        container.addView(etApiKey)
-        llActionRow = createButtonRow()
-        container.addView(llActionRow)
-        llResult = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+
+        header.addView(createHeaderTitleRow())
+        header.addView(createHeaderActionRow())
+        llAddKeyPanel = createAddKeyPanel()
+        header.addView(llAddKeyPanel)
+        tvEmptyHint = createText("添加 Key 后可集中查看各订阅的额度和到期时间", 13f, R.color.gray_727272, false).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 14.dp
+            }
+            gravity = Gravity.CENTER
+        }
+        header.addView(tvEmptyHint)
+
+        planUsageKeyAdapter = PlanUsageKeyAdapter(::renderPlanKeyCard)
+        rvPlanKeys = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@PlanUsageInputActivity)
+            adapter = planUsageKeyAdapter
+            isNestedScrollingEnabled = true
+            clipToPadding = false
+            setPadding(0, 4.dp, 0, 16.dp)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
             )
         }
-        container.addView(llResult)
-        scrollView.addView(container)
-        return scrollView
+
+        root.addView(header)
+        root.addView(rvPlanKeys)
+        return root
     }
 
     /**
-     * 输入模式展示粘贴和查询；保存 key 后切换为重置和刷新，减少无关操作干扰。
+     * 标题行同时显示当前数量和整体刷新进度，避免刷新状态分散到每一张卡片外。
      */
-    private fun createButtonRow(): LinearLayout {
+    private fun createHeaderTitleRow(): LinearLayout {
+        return LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.HORIZONTAL
+            tvKeyCount = createText("我的 Key（0）", 20f, R.color.gray_212121, true).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            tvRefreshStatus = createText("", 13f, R.color.blue_2771fa, false).apply {
+                gravity = Gravity.END
+            }
+            addView(tvKeyCount)
+            addView(tvRefreshStatus)
+        }
+    }
+
+    /**
+     * 添加和整体刷新保持并列，按钮高度、间距与现有工具页操作区统一。
+     */
+    private fun createHeaderActionRow(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
+                topMargin = 10.dp
+            }
+            btnAddKey = Button(this@PlanUsageInputActivity).apply {
+                text = "添加 Key"
+                isAllCaps = false
+                setOnClickListener { showAddKeyPanel() }
+                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
+                    marginEnd = 6.dp
+                }
+            }
+            btnRefreshAll = Button(this@PlanUsageInputActivity).apply {
+                text = "刷新全部"
+                isAllCaps = false
+                setOnClickListener { refreshAllPlanKeys() }
+                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
+                    marginStart = 6.dp
+                }
+            }
+            addView(btnAddKey)
+            addView(btnRefreshAll)
+        }
+    }
+
+    /**
+     * 添加面板使用和结果卡片相同的圆角白底，避免输入区与列表卡片割裂。
+     */
+    private fun createAddKeyPanel(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14.dp, 14.dp, 14.dp, 14.dp)
+            background = createPanelBackgroundDrawable()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
                 topMargin = 12.dp
+            }
+            addView(createText("添加订阅 Key", 16f, R.color.gray_212121, true))
+            etKeyName = EditText(this@PlanUsageInputActivity).apply {
+                hint = "名称（可选，例如主力 Key）"
+                isSingleLine = true
+                setPadding(12.dp, 0, 12.dp, 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    44.dp
+                ).apply {
+                    topMargin = 10.dp
+                }
+            }
+            etApiKey = EditText(this@PlanUsageInputActivity).apply {
+                hint = "请输入 plan- 开头的 apikey"
+                isSingleLine = true
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                setSelectAllOnFocus(true)
+                setPadding(12.dp, 0, 12.dp, 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    44.dp
+                ).apply {
+                    topMargin = 8.dp
+                }
+            }
+            addView(etKeyName)
+            addView(etApiKey)
+            val actionRow = LinearLayout(this@PlanUsageInputActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = 10.dp
+                }
             }
             btnPasteKey = Button(this@PlanUsageInputActivity).apply {
                 text = "粘贴"
@@ -148,25 +271,17 @@ class PlanUsageInputActivity : AppCompatActivity() {
                     marginEnd = 6.dp
                 }
             }
-            btnResetKey = Button(this@PlanUsageInputActivity).apply {
-                text = "重置 Key"
+            btnQueryAndAdd = Button(this@PlanUsageInputActivity).apply {
+                text = "查询并添加"
                 isAllCaps = false
-                setOnClickListener { resetApiKey() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-                    marginEnd = 6.dp
-                }
-            }
-            btnRefreshPage = Button(this@PlanUsageInputActivity).apply {
-                text = "刷新页面"
-                isAllCaps = false
-                setOnClickListener { refreshWithInputKey() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
+                setOnClickListener { queryAndAddPlanKey() }
+                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 2f).apply {
                     marginStart = 6.dp
                 }
             }
-            addView(btnPasteKey)
-            addView(btnResetKey)
-            addView(btnRefreshPage)
+            actionRow.addView(btnPasteKey)
+            actionRow.addView(btnQueryAndAdd)
+            addView(actionRow)
         }
     }
 
@@ -193,227 +308,451 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 点击刷新时以输入框为准，保存到 SP 后再查询，方便下次打开自动恢复。
+     * 刷新页面上的数量、添加状态和列表缓存；列表状态始终从同一份 Key 数据派生。
      */
-    private fun refreshWithInputKey() {
+    private fun renderPage() {
+        tvKeyCount.text = "我的 Key（${savedPlanKeys.size}）"
+        tvRefreshStatus.text = when {
+            isRefreshingAll -> "刷新中 ${refreshCurrentIndex}/${refreshTotalCount}"
+            !refreshStatusText.isNullOrBlank() -> refreshStatusText
+            else -> ""
+        }
+        tvRefreshStatus.visibility = if (tvRefreshStatus.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        btnAddKey.isEnabled = !isRefreshingAll
+        btnRefreshAll.isEnabled = savedPlanKeys.isNotEmpty() && !isRefreshingAll
+        btnRefreshAll.text = if (isRefreshingAll) "刷新中..." else "刷新全部"
+        btnQueryAndAdd.isEnabled = !isAddingKey && !isRefreshingAll
+        btnQueryAndAdd.text = if (isAddingKey) "查询中..." else "查询并添加"
+        btnPasteKey.isEnabled = !isAddingKey && !isRefreshingAll
+        llAddKeyPanel.visibility = if (isAddKeyPanelVisible) View.VISIBLE else View.GONE
+        tvEmptyHint.visibility = if (savedPlanKeys.isEmpty()) View.VISIBLE else View.GONE
+        rvPlanKeys.visibility = if (savedPlanKeys.isEmpty()) View.GONE else View.VISIBLE
+        planUsageKeyAdapter.submit(sortedPlanKeys(), refreshingKeyIds)
+    }
+
+    /**
+     * 添加入口始终保留用户已输入的内容，避免收起面板时误清空尚未验证的新 Key。
+     */
+    private fun showAddKeyPanel() {
+        if (isRefreshingAll) {
+            return
+        }
+        isAddKeyPanelVisible = true
+        renderPage()
+        etApiKey.requestFocus()
+    }
+
+    /**
+     * 仅在接口可正常返回时新增 Key，失败时保留用户输入，便于修正后再次查询。
+     */
+    private fun queryAndAddPlanKey() {
+        if (isAddingKey || isRefreshingAll) {
+            return
+        }
         val apiKey = etApiKey.text?.toString()?.trim().orEmpty()
         if (apiKey.isBlank()) {
-            val savedApiKey = getSavedApiKey()
-            MyToastD.show(if (savedApiKey.isBlank()) "请输入 apikey" else "请输入新的 apikey")
-            showInputMode()
-            if (savedApiKey.isBlank()) {
-                renderEmptyPrompt()
-            } else {
-                renderKeyEditingPrompt(savedApiKey)
+            MyToastD.show("请输入 apikey")
+            return
+        }
+        val duplicatedKey = savedPlanKeys.firstOrNull { it.apiKey == apiKey }
+        if (duplicatedKey != null) {
+            MyToastD.show("该 Key 已添加")
+            isAddKeyPanelVisible = false
+            hideKeyboard()
+            renderPage()
+            scrollToPlanKey(duplicatedKey.id)
+            return
+        }
+        isAddingKey = true
+        renderPage()
+        hideKeyboard()
+        lifecycleScope.launch {
+            val result = queryPlanUsage(apiKey)
+            isAddingKey = false
+            if (result.error != null) {
+                renderPage()
+                MyToastD.show("订阅查询失败：${result.error}")
+                return@launch
             }
+            val now = System.currentTimeMillis()
+            val name = etKeyName.text?.toString()?.trim().orEmpty().ifBlank {
+                "Key ${savedPlanKeys.size + 1}"
+            }
+            savedPlanKeys.add(
+                SavedPlanKey(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    apiKey = apiKey,
+                    createdAt = now,
+                    lastUpdatedAt = now,
+                    cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
+                    cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
+                    cachedUsage = result.usage
+                )
+            )
+            planUsageKeyStore.saveKeys(savedPlanKeys)
+            etKeyName.setText("")
+            etApiKey.setText("")
+            isAddKeyPanelVisible = false
+            refreshStatusText = null
+            renderPage()
+            scrollToPlanKey(savedPlanKeys.last().id)
+            MyToastD.show("已添加 $name")
+        }
+    }
+
+    /**
+     * 全部刷新按当前展示顺序串行发起，避免多个 Key 同时请求导致接口压力或状态错位。
+     */
+    private fun refreshAllPlanKeys() {
+        if (savedPlanKeys.isEmpty() || isRefreshingAll) {
             return
         }
         hideKeyboard()
-        saveApiKey(apiKey)
-        showSavedKeyMode()
-        loadPlanUsage(apiKey)
-    }
-
-    /**
-     * 进入重新输入 key 的状态；旧 key 在新 key 查询前继续保留，避免误点后丢失可用配置。
-     */
-    private fun resetApiKey() {
-        val savedApiKey = getSavedApiKey()
-        etApiKey.setText("")
-        showInputMode()
-        if (savedApiKey.isBlank()) {
-            renderEmptyPrompt()
-        } else {
-            renderKeyEditingPrompt(savedApiKey)
-        }
-        MyToastD.show("请输入新的 Key")
-    }
-
-    /**
-     * 查询时输入框会隐藏，先收起软键盘避免页面状态和输入法状态不一致。
-     */
-    private fun hideKeyboard() {
-        etApiKey.clearFocus()
-        val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        inputMethodManager?.hideSoftInputFromWindow(etApiKey.windowToken, 0)
-    }
-
-    /**
-     * 无本地 key 时展示输入框、粘贴和查询按钮，减少首次打开页面的操作干扰。
-     */
-    private fun showInputMode() {
-        etApiKey.visibility = View.VISIBLE
-        llActionRow.updateLayoutParams<LinearLayout.LayoutParams> {
-            topMargin = 12.dp
-        }
-        btnPasteKey.visibility = View.VISIBLE
-        btnResetKey.visibility = View.GONE
-        btnRefreshPage.text = "查询"
-        btnRefreshPage.isEnabled = true
-        btnRefreshPage.layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-            marginStart = 6.dp
-        }
-    }
-
-    /**
-     * 已保存 key 时隐藏输入框，只保留重置和刷新，避免误编辑当前正在查询的 key。
-     */
-    private fun showSavedKeyMode() {
-        etApiKey.visibility = View.GONE
-        llActionRow.updateLayoutParams<LinearLayout.LayoutParams> {
-            topMargin = 0
-        }
-        btnPasteKey.visibility = View.GONE
-        btnResetKey.visibility = View.VISIBLE
-        btnResetKey.isEnabled = true
-        btnRefreshPage.text = "刷新页面"
-        btnRefreshPage.isEnabled = true
-        btnRefreshPage.layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-            marginStart = 6.dp
-        }
-    }
-
-    /**
-     * 如果输入了新 key，需要同步清理旧 key 的窗口结束时间缓存。
-     * @param apiKey 当前输入框中的订阅 key
-     */
-    private fun saveApiKey(apiKey: String) {
-        val oldApiKey = getSavedApiKey()
-        val editor = planUsagePrefs.edit().putString(PREF_KEY_API_KEY, apiKey)
-        if (oldApiKey != apiKey) {
-            editor.remove(PREF_KEY_DAY_WINDOW_END_AT)
-            editor.remove(PREF_KEY_WEEK_WINDOW_END_AT)
-        }
-        editor.apply()
-    }
-
-    private fun getSavedApiKey(): String {
-        return planUsagePrefs.getString(PREF_KEY_API_KEY, null).orEmpty()
-    }
-
-    /**
-     * 查询当前输入 key 的订阅用量，结果、空订阅和错误都直接显示在页面卡片里。
-     * @param apiKey 已保存并用于鉴权的订阅 key
-     */
-    private fun loadPlanUsage(apiKey: String) {
-        btnRefreshPage.isEnabled = false
-        btnResetKey.isEnabled = false
-        btnRefreshPage.text = "查询中..."
-        showLoadingCard(apiKey)
+        isAddKeyPanelVisible = false
+        isRefreshingAll = true
+        refreshStatusText = null
+        val refreshQueue = sortedPlanKeys()
+        refreshTotalCount = refreshQueue.size
+        refreshCurrentIndex = 0
+        renderPage()
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    PlanUsageQueryResult(requestUsage(apiKey), null)
-                } catch (throwable: Throwable) {
-                    PlanUsageQueryResult(null, throwable.message ?: "查询失败")
-                }
+            refreshQueue.forEachIndexed { index, planKey ->
+                refreshCurrentIndex = index + 1
+                refreshingKeyIds.add(planKey.id)
+                renderPage()
+                val result = queryPlanUsage(planKey.apiKey)
+                refreshingKeyIds.remove(planKey.id)
+                applyRefreshResult(planKey.id, result)
+                renderPage()
             }
-            renderResult(apiKey, result)
-            if (getSavedApiKey().isBlank()) {
-                showInputMode()
-            } else {
-                showSavedKeyMode()
-            }
-            if (result.error != null) {
-                MyToastD.show("订阅查询失败")
-            }
+            isRefreshingAll = false
+            refreshStatusText = "已刷新 ${refreshTotalCount} 项"
+            renderPage()
         }
     }
 
     /**
-     * 没有 key 时显示输入提示，避免空页面。
+     * 成功刷新才覆盖卡片缓存；请求失败只记录当次提示，旧额度仍然可以继续查看。
+     * @param keyId 本次请求对应的 Key ID
+     * @param result 接口查询结果
      */
-    private fun renderEmptyPrompt() {
-        llResult.removeAllViews()
-        llResult.addView(createCard().apply {
-            addView(createText("请输入 apikey 后点击查询", 14f, R.color.gray_727272, false))
-        })
+    private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult) {
+        if (result.error != null) {
+            latestErrorByKeyId[keyId] = result.error
+            return
+        }
+        latestErrorByKeyId.remove(keyId)
+        updatePlanKey(keyId) { planKey ->
+            planKey.copy(
+                lastUpdatedAt = System.currentTimeMillis(),
+                cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
+                cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
+                cachedUsage = result.usage
+            )
+        }
     }
 
     /**
-     * 重置后展示换 key 提示；此时旧 key 仍在 SP 中，只有查询新 key 时才会被覆盖。
-     * @param savedApiKey 当前仍保留在本地的订阅 key
+     * 卡片展示顺序固定为置顶在前，组内按添加时间正序，后添加的 Key 会自然排在列表后面。
      */
-    private fun renderKeyEditingPrompt(savedApiKey: String) {
-        llResult.removeAllViews()
-        llResult.addView(createCard().apply {
-            addView(createText("请输入新的 apikey 后点击查询", 14f, R.color.gray_727272, false))
-            addView(createText("未查询前仍保留：${maskKey(savedApiKey)}", 12f, R.color.gray_999999, false).apply {
+    private fun sortedPlanKeys(): List<SavedPlanKey> {
+        return savedPlanKeys.sortedWith(
+            compareByDescending<SavedPlanKey> { it.isPinned }
+                .thenBy { it.createdAt }
+        )
+    }
+
+    /**
+     * 更新一项后立即写入 SP，保证展开、置顶、命名和刷新缓存关闭 App 后仍能恢复。
+     * @param keyId 需要更新的 Key ID
+     * @param transform 基于旧条目生成新条目的变换
+     */
+    private fun updatePlanKey(keyId: String, transform: (SavedPlanKey) -> SavedPlanKey) {
+        val index = savedPlanKeys.indexOfFirst { it.id == keyId }
+        if (index < 0) {
+            return
+        }
+        savedPlanKeys[index] = transform(savedPlanKeys[index])
+        planUsageKeyStore.saveKeys(savedPlanKeys)
+    }
+
+    /**
+     * 将重复 Key 或刚添加的新 Key 定位到当前排序后的卡片位置，减少用户再次查找的成本。
+     */
+    private fun scrollToPlanKey(keyId: String) {
+        val index = sortedPlanKeys().indexOfFirst { it.id == keyId }
+        if (index >= 0) {
+            rvPlanKeys.post { rvPlanKeys.smoothScrollToPosition(index) }
+        }
+    }
+
+    /**
+     * 卡片容器由 RecyclerView 复用，页面层根据持久状态补齐完整的展示内容和交互入口。
+     */
+    private fun renderPlanKeyCard(card: LinearLayout, planKey: SavedPlanKey, isRefreshing: Boolean) {
+        card.removeAllViews()
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.HORIZONTAL
+            isClickable = true
+            setOnClickListener {
+                updatePlanKey(planKey.id) { it.copy(isExpanded = !it.isExpanded) }
+                renderPage()
+            }
+        }
+        val titleColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleColumn.addView(createText(planKey.name, 18f, R.color.gray_212121, true))
+        titleColumn.addView(createText(maskKey(planKey.apiKey), 12f, R.color.gray_999999, false).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 2.dp
+            }
+        })
+        val toggleView = createText(if (planKey.isExpanded) "收起" else "展开", 13f, R.color.blue_2771fa, false).apply {
+            setPadding(8.dp, 8.dp, 4.dp, 8.dp)
+            gravity = Gravity.CENTER
+            setOnClickListener {
+                updatePlanKey(planKey.id) { it.copy(isExpanded = !it.isExpanded) }
+                renderPage()
+            }
+        }
+        val manageView = createText("管理", 13f, R.color.blue_2771fa, false).apply {
+            setPadding(8.dp, 8.dp, 0, 8.dp)
+            gravity = Gravity.CENTER
+            setOnClickListener { showPlanKeyMenu(this, planKey) }
+        }
+        val actionRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.HORIZONTAL
+            addView(toggleView)
+            addView(manageView)
+        }
+        header.addView(titleColumn)
+        header.addView(actionRow)
+        card.addView(header)
+
+        if (isRefreshing) {
+            card.addView(createText("正在刷新...", 13f, R.color.blue_2771fa, false).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    topMargin = 6.dp
+                    topMargin = 10.dp
                 }
             })
-        })
-    }
-
-    /**
-     * 查询过程中先显示脱敏 key，用户能确认当前请求的是哪个 key。
-     * @param apiKey 当前正在查询的订阅 key
-     */
-    private fun showLoadingCard(apiKey: String) {
-        llResult.removeAllViews()
-        llResult.addView(createCard().apply {
-            renderCardHeader(this, apiKey, "重置日查询中")
-            addView(createText("查询中...", 14f, R.color.gray_727272, false))
-        })
-    }
-
-    /**
-     * 按固定 key 页面同样的结构展示周期订阅和资源包套餐。
-     * @param apiKey 本次查询使用的订阅 key
-     * @param result 接口请求后的页面结果
-     */
-    private fun renderResult(apiKey: String, result: PlanUsageQueryResult) {
-        llResult.removeAllViews()
-        val card = createCard()
-        val usage = result.usage
-        renderCardHeader(card, apiKey, formatWeekResetHint(usage?.weekWindowEndAt))
-        if (result.error != null) {
-            card.addView(createText("查询失败：${result.error}", 14f, R.color.orange_fe5d36, false))
-            addCachedWindowRows(card)
-            llResult.addView(card)
+        }
+        latestErrorByKeyId[planKey.id]?.let { error ->
+            card.addView(createText("本次刷新失败：$error，保留上次数据", 13f, R.color.orange_fe5d36, false).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = 10.dp
+                }
+            })
+        }
+        if (!planKey.isExpanded) {
+            card.addView(createText("已收起，点击卡片标题展开详情", 13f, R.color.gray_727272, false).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = 10.dp
+                }
+            })
             return
         }
+        renderPlanKeyDetails(card, planKey)
+    }
+
+    /**
+     * 展开的卡片沿用原有用量、到期时间和倍率样式，缓存不存在时明确引导用户使用整体刷新。
+     */
+    private fun renderPlanKeyDetails(card: LinearLayout, planKey: SavedPlanKey) {
+        val usage = planKey.cachedUsage
         if (usage == null) {
-            card.addView(createText("当前 key 无可用订阅或额度已耗尽", 14f, R.color.gray_727272, false))
-            addCachedWindowRows(card)
-            llResult.addView(card)
+            val message = if (planKey.lastUpdatedAt == null) {
+                "暂无缓存，点击刷新全部获取最新额度"
+            } else {
+                "当前 Key 无可用订阅或额度已耗尽"
+            }
+            card.addView(createText(message, 14f, R.color.gray_727272, false).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = 10.dp
+                }
+            })
+            addCachedWindowRows(card, planKey)
+            addLastUpdatedRow(card, planKey.lastUpdatedAt)
             return
         }
         addRow(card, "套餐", usage.planName ?: "--")
         addRow(card, "类型/状态", "${usage.type ?: "--"} / ${usage.status ?: "--"}")
         addRow(card, "开始时间", formatBeijingTime(usage.startAt))
         addRow(card, "到期时间", formatBeijingTime(usage.endAt))
-        val hasCycleUsage = usage.hasCycleUsage()
-        val hasResourceUsage = usage.hasResourceUsage()
-        if (hasCycleUsage) {
+        if (usage.hasCycleUsage()) {
             addSectionTitle(card, "周期订阅")
             addUsageProgress(card, "日额度", usage.dailyUsedUsd, usage.dailyLimitUsd, usage.dailyRemainingUsd)
             addUsageProgress(card, "周额度", usage.weeklyUsedUsd, usage.weeklyLimitUsd, usage.weeklyRemainingUsd)
-            addRow(card, "日窗口结束", formatWindowEndAt(PREF_KEY_DAY_WINDOW_END_AT, usage.dayWindowEndAt))
-            addRow(card, "周窗口结束", formatWindowEndAt(PREF_KEY_WEEK_WINDOW_END_AT, usage.weekWindowEndAt))
+            addRow(card, "日窗口结束", formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt))
+            addRow(card, "周窗口结束", formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt))
         }
-        if (hasResourceUsage) {
+        if (usage.hasResourceUsage()) {
             addSectionTitle(card, "资源包套餐")
             addTokenProgress(card, usage.totalTokens, usage.consumedTokens, usage.remainingTokens)
         }
-        if (!hasResourceUsage && !hasCycleUsage) {
-            card.addView(createText("暂无可展示额度", 14f, R.color.gray_727272, false))
+        if (!usage.hasResourceUsage() && !usage.hasCycleUsage()) {
+            card.addView(createText("暂无可展示额度", 14f, R.color.gray_727272, false).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = 10.dp
+                }
+            })
         }
         addRow(card, "允许模型", usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString() ?: "--")
         addRow(card, "分组倍率", formatGroupMultipliers(usage))
-        llResult.addView(card)
+        addLastUpdatedRow(card, planKey.lastUpdatedAt)
     }
 
     /**
-     * 空订阅或请求失败时仍展示上次成功缓存的窗口结束时间。
+     * 无订阅或刷新失败时仍保留旧窗口信息，避免用户无法判断下一次额度恢复时间。
      */
-    private fun addCachedWindowRows(card: LinearLayout) {
-        addRow(card, "日窗口结束", formatWindowEndAt(PREF_KEY_DAY_WINDOW_END_AT, null))
-        addRow(card, "周窗口结束", formatWindowEndAt(PREF_KEY_WEEK_WINDOW_END_AT, null))
+    private fun addCachedWindowRows(card: LinearLayout, planKey: SavedPlanKey) {
+        addRow(card, "日窗口结束", formatWindowEndAt(planKey.cachedDayWindowEndAt))
+        addRow(card, "周窗口结束", formatWindowEndAt(planKey.cachedWeekWindowEndAt))
+    }
+
+    /**
+     * 每张卡片单独显示最后成功更新时刻，用户可以区分缓存数据和本次刷新结果。
+     */
+    private fun addLastUpdatedRow(card: LinearLayout, lastUpdatedAt: Long?) {
+        val lastUpdatedText = lastUpdatedAt?.let { formatLocalTime(it) } ?: "未查询"
+        addRow(card, "上次更新", lastUpdatedText)
+    }
+
+    /**
+     * 管理菜单只提供置顶、命名和删除，刻意不加入单卡刷新以保持用户确认的整体刷新规则。
+     */
+    private fun showPlanKeyMenu(anchor: View, planKey: SavedPlanKey) {
+        if (isRefreshingAll) {
+            MyToastD.show("正在刷新全部 Key")
+            return
+        }
+        PopupMenu(this, anchor).apply {
+            menu.add(0, MENU_PIN, 0, if (planKey.isPinned) "取消置顶" else "置顶")
+            menu.add(0, MENU_RENAME, 1, "重命名")
+            menu.add(0, MENU_DELETE, 2, "删除")
+            setOnMenuItemClickListener { menuItem ->
+                when (menuItem.itemId) {
+                    MENU_PIN -> updatePlanKey(planKey.id) {
+                        it.copy(
+                            isPinned = !it.isPinned,
+                            pinnedAt = if (it.isPinned) 0L else System.currentTimeMillis()
+                        )
+                    }
+                    MENU_RENAME -> showRenameDialog(planKey)
+                    MENU_DELETE -> showDeleteDialog(planKey)
+                }
+                if (menuItem.itemId == MENU_PIN) {
+                    renderPage()
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    /**
+     * 自定义名称仅用于本地识别，不会影响接口请求中的原始 Key。
+     */
+    private fun showRenameDialog(planKey: SavedPlanKey) {
+        val input = EditText(this).apply {
+            setText(planKey.name)
+            setSelectAllOnFocus(true)
+            isSingleLine = true
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(12.dp, 8.dp, 12.dp, 8.dp)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                52.dp
+            )
+        }
+        val inputContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24.dp, 2.dp, 24.dp, 6.dp)
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("重命名 Key")
+            .setView(inputContainer)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val newName = input.text?.toString()?.trim().orEmpty()
+                if (newName.isBlank()) {
+                    MyToastD.show("名称不能为空")
+                    return@setOnClickListener
+                }
+                updatePlanKey(planKey.id) { it.copy(name = newName) }
+                renderPage()
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    /**
+     * 删除会移除本地 Key 与对应缓存，使用二次确认避免误操作后丢失查询配置。
+     */
+    private fun showDeleteDialog(planKey: SavedPlanKey) {
+        AlertDialog.Builder(this)
+            .setTitle("删除 ${planKey.name}")
+            .setMessage("删除后将移除此 Key 的本地缓存，是否继续？")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("删除") { _, _ ->
+                savedPlanKeys.removeAll { it.id == planKey.id }
+                latestErrorByKeyId.remove(planKey.id)
+                planUsageKeyStore.saveKeys(savedPlanKeys)
+                if (savedPlanKeys.isEmpty()) {
+                    isAddKeyPanelVisible = true
+                }
+                renderPage()
+            }
+            .show()
+    }
+
+    /**
+     * 查询在 IO 线程执行，所有入口共用相同异常语义，保证添加与整体刷新展示一致。
+     */
+    private suspend fun queryPlanUsage(apiKey: String): PlanUsageQueryResult {
+        return withContext(Dispatchers.IO) {
+            try {
+                PlanUsageQueryResult(requestUsage(apiKey), null)
+            } catch (throwable: Throwable) {
+                PlanUsageQueryResult(null, throwable.message ?: "查询失败")
+            }
+        }
+    }
+
+    /**
+     * 收起输入法，避免新增或整体刷新后输入框已经隐藏但键盘仍停留在页面上。
+     */
+    private fun hideKeyboard() {
+        etApiKey.clearFocus()
+        val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        inputMethodManager?.hideSoftInputFromWindow(etApiKey.windowToken, 0)
     }
 
     /**
@@ -491,40 +830,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 每张结果卡顶部展示重置日和脱敏 key，方便确认当前查询对象。
+     * 添加区域与列表卡片共用白色圆角背景，让页面在多模块时仍保持同一层级。
      */
-    private fun renderCardHeader(card: LinearLayout, apiKey: String, resetHint: String) {
-        card.addView(createText("当前 Key  $resetHint", 18f, R.color.gray_212121, true))
-        card.addView(
-            createText(maskKey(apiKey), 12f, R.color.gray_999999, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 2.dp
-                    bottomMargin = 10.dp
-                }
-            }
-        )
-    }
-
-    /**
-     * 创建通用结果卡片，复用固定 key 页面视觉。
-     */
-    private fun createCard(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(16.dp, 14.dp, 16.dp, 14.dp)
-            background = GradientDrawable().apply {
-                cornerRadius = 10.dp.toFloat()
-                setColor(getColorCompat(R.color.white))
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 12.dp
-            }
+    private fun createPanelBackgroundDrawable(): GradientDrawable {
+        return GradientDrawable().apply {
+            cornerRadius = 10.dp.toFloat()
+            setColor(getColorCompat(R.color.white))
         }
     }
 
@@ -667,20 +978,13 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 创建圆角渐变进度条；用权重模拟进度，保证小额消耗也能保留可见宽度。
+     * 创建圆角渐变进度条；非零小额用量至少保留一个完整胶囊宽度，避免圆角在窄填充时变形。
      * @param usedRate 当前已用比例
      * @param isWarning 是否超过预警线或已耗尽
      */
     private fun createUsageProgressBar(usedRate: Double?, isWarning: Boolean): View {
         val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        val progressWeight = if (progressRate <= 0f) {
-            0f
-        } else {
-            (progressRate * PROGRESS_WEIGHT_TOTAL).coerceAtLeast(1f)
-        }
-        val remainingWeight = (PROGRESS_WEIGHT_TOTAL - progressWeight).coerceAtLeast(0f)
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        return FrameLayout(this).apply {
             background = createProgressBackgroundDrawable()
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -688,24 +992,25 @@ class PlanUsageInputActivity : AppCompatActivity() {
             ).apply {
                 topMargin = 6.dp
             }
-            if (progressWeight > 0f) {
-                addView(View(this@PlanUsageInputActivity).apply {
-                    background = createProgressFillDrawable(isWarning)
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        progressWeight
-                    )
-                })
+            if (progressRate <= 0f) {
+                return@apply
             }
-            if (remainingWeight > 0f) {
-                addView(View(this@PlanUsageInputActivity).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        remainingWeight
+            val progressView = View(this@PlanUsageInputActivity).apply {
+                background = createProgressFillDrawable(isWarning)
+            }
+            addView(progressView)
+            addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+                val containerWidth = right - left
+                val actualWidth = (containerWidth * progressRate).roundToInt()
+                val progressWidth = actualWidth
+                    .coerceAtLeast(PROGRESS_MIN_VISIBLE_WIDTH_DP.dp)
+                    .coerceAtMost(containerWidth)
+                if (progressView.layoutParams.width != progressWidth) {
+                    progressView.layoutParams = FrameLayout.LayoutParams(
+                        progressWidth,
+                        ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                })
+                }
             }
         }
     }
@@ -787,33 +1092,11 @@ class PlanUsageInputActivity : AppCompatActivity() {
         return (consumedTokens.toDouble() / totalTokens.toDouble()).coerceIn(0.0, 1.0)
     }
 
-    private fun formatWeekResetHint(weekWindowEndAt: String?): String {
-        val usableWindowEndAt = resolveWindowEndAt(PREF_KEY_WEEK_WINDOW_END_AT, weekWindowEndAt)
-        val date = parseWindowEndAt(usableWindowEndAt) ?: return RESET_UNKNOWN_HINT
-        val calendar = Calendar.getInstance(BEIJING_TIME_ZONE).apply {
-            time = date
-        }
-        return "每${formatWeekDay(calendar.get(Calendar.DAY_OF_WEEK))}重置"
-    }
-
-    private fun formatWindowEndAt(cacheKey: String, windowEndAt: String?): String {
-        return formatBeijingTime(resolveWindowEndAt(cacheKey, windowEndAt))
-    }
-
     /**
-     * 只缓存接口返回且能解析的真实窗口时间，接口无值时回退 SP 缓存。
+     * 多 Key 的窗口时间已经随各自条目缓存，格式化时不再读取全局 SP 字段。
      */
-    private fun resolveWindowEndAt(cacheKey: String, windowEndAt: String?): String? {
-        val realWindowEndAt = windowEndAt?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?.takeIf { parseWindowEndAt(it) != null }
-        if (realWindowEndAt != null) {
-            planUsagePrefs.edit()
-                .putString(cacheKey, realWindowEndAt)
-                .apply()
-            return realWindowEndAt
-        }
-        return planUsagePrefs.getString(cacheKey, null)
+    private fun formatWindowEndAt(windowEndAt: String?): String {
+        return formatBeijingTime(windowEndAt)
     }
 
     /**
@@ -822,6 +1105,13 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private fun formatBeijingTime(windowEndAt: String?): String {
         val date = parseWindowEndAt(windowEndAt) ?: return "--"
         return "${BEIJING_TIME_FORMAT.format(date)} 北京时间"
+    }
+
+    /**
+     * 本地缓存更新时间以北京时间展示，和服务端返回的窗口时间保持同一种阅读习惯。
+     */
+    private fun formatLocalTime(timeMillis: Long): String {
+        return "${BEIJING_TIME_FORMAT.format(Date(timeMillis))} 北京时间"
     }
 
     private fun parseWindowEndAt(windowEndAt: String?): Date? {
@@ -834,19 +1124,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
             }
         }
         return null
-    }
-
-    private fun formatWeekDay(dayOfWeek: Int): String {
-        return when (dayOfWeek) {
-            Calendar.MONDAY -> "周一"
-            Calendar.TUESDAY -> "周二"
-            Calendar.WEDNESDAY -> "周三"
-            Calendar.THURSDAY -> "周四"
-            Calendar.FRIDAY -> "周五"
-            Calendar.SATURDAY -> "周六"
-            Calendar.SUNDAY -> "周日"
-            else -> "周--"
-        }
     }
 
     /**
@@ -989,49 +1266,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 页面展示层使用的用量快照，只保留本次需要查看的额度、周期和分组倍率字段。
-     */
-    data class PlanUsageSnapshot(
-        val planName: String?,
-        val type: Int?,
-        val status: Int?,
-        val startAt: String?,
-        val endAt: String?,
-        val dailyLimitUsd: Double?,
-        val weeklyLimitUsd: Double?,
-        val dailyUsedUsd: Double?,
-        val weeklyUsedUsd: Double?,
-        val dailyRemainingUsd: Double?,
-        val weeklyRemainingUsd: Double?,
-        val dayWindowEndAt: String?,
-        val weekWindowEndAt: String?,
-        val totalTokens: Long?,
-        val consumedTokens: Long?,
-        val remainingTokens: Long?,
-        val allowedModels: List<String>,
-        val allowedGroups: List<String>,
-        val groupNames: Map<String, String>,
-        val groupMultipliers: Map<String, Double>
-    ) {
-        /**
-         * 资源包套餐以 token 字段为主，只要任一 token 额度字段有有效值就展示资源包区块。
-         */
-        fun hasResourceUsage(): Boolean {
-            return listOf(totalTokens, consumedTokens, remainingTokens).any { value ->
-                value != null && value > 0L
-            }
-        }
-
-        /**
-         * 周期订阅以日/周美元额度为主，只要任一周期额度字段有有效值就展示周期区块。
-         */
-        fun hasCycleUsage(): Boolean {
-            return listOf(dailyLimitUsd, weeklyLimitUsd, dailyUsedUsd, weeklyUsedUsd, dailyRemainingUsd, weeklyRemainingUsd)
-                .any { value -> value != null && value > 0.0 }
-        }
-    }
-
-    /**
      * 单 key 查询结果，允许成功空订阅和失败状态共用同一套渲染入口。
      */
     data class PlanUsageQueryResult(
@@ -1042,12 +1276,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
     companion object {
         private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
-        private const val PROGRESS_WEIGHT_TOTAL = 1000f
-        private const val RESET_UNKNOWN_HINT = "重置日未知"
-        private const val PLAN_USAGE_INPUT_PREFS_NAME = "plan_usage_input_cache"
-        private const val PREF_KEY_API_KEY = "api_key"
-        private const val PREF_KEY_DAY_WINDOW_END_AT = "day_window_end_at"
-        private const val PREF_KEY_WEEK_WINDOW_END_AT = "week_window_end_at"
+        private const val PROGRESS_MIN_VISIBLE_WIDTH_DP = 8
+        private const val MENU_PIN = 1
+        private const val MENU_RENAME = 2
+        private const val MENU_DELETE = 3
         /**
          * 分组默认倍率基线，用于判断接口返回倍率是否低于常规值。
          */

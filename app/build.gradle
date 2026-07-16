@@ -12,7 +12,7 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 2
-        versionName "1.1"
+        versionName "2.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -46,8 +46,8 @@ android {
     }
     applicationVariants.all { variant ->
         variant.outputs.all {
-            // 固定导出的 APK 文件名，方便直接发给别人安装。
-            outputFileName = "MyRoutin.apk"
+            // 输出文件名带上版本号，方便发包时区分安装包版本。
+            outputFileName = "MyRoutin-${variant.versionName}.apk"
         }
     }
 }
@@ -56,6 +56,7 @@ dependencies {
 
     implementation 'androidx.core:core-ktx:1.8.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.5.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
     implementation 'com.google.android.material:material:1.8.0'

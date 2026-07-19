@@ -12,7 +12,7 @@ import java.util.UUID
  * 说明：订阅 Key 列表的 SP 存储入口，负责旧单 Key 数据的无感迁移和每张卡片状态恢复。
  *
  * @作者 huangssh
- * @版本 1.1
+ * @版本 2.0
  */
 class PlanUsageKeyStore(context: Context) {
 
@@ -82,6 +82,8 @@ class PlanUsageKeyStore(context: Context) {
                     put("pinnedAt", key.pinnedAt)
                     put("createdAt", key.createdAt)
                     putNullable("lastUpdatedAt", key.lastUpdatedAt)
+                    putNullable("cachedStartAt", key.cachedStartAt)
+                    putNullable("cachedEndAt", key.cachedEndAt)
                     putNullable("cachedDayWindowEndAt", key.cachedDayWindowEndAt)
                     putNullable("cachedWeekWindowEndAt", key.cachedWeekWindowEndAt)
                     putNullable("cachedUsage", key.cachedUsage?.toJsonObject())
@@ -117,6 +119,8 @@ class PlanUsageKeyStore(context: Context) {
             pinnedAt = optLong("pinnedAt", 0L),
             createdAt = optLong("createdAt", 0L),
             lastUpdatedAt = longOrNull("lastUpdatedAt"),
+            cachedStartAt = stringOrNull("cachedStartAt"),
+            cachedEndAt = stringOrNull("cachedEndAt"),
             cachedDayWindowEndAt = stringOrNull("cachedDayWindowEndAt"),
             cachedWeekWindowEndAt = stringOrNull("cachedWeekWindowEndAt"),
             cachedUsage = optJSONObject("cachedUsage")?.toPlanUsageSnapshot()

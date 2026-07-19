@@ -4,7 +4,7 @@ package com.hss.mycodex.model
  * 说明：本地保存的订阅 Key 条目，承载列表排序、卡片展开状态和最近一次成功查询结果。
  *
  * @作者 huangssh
- * @版本 1.1
+ * @版本 2.0
  */
 data class SavedPlanKey(
     val id: String,
@@ -15,6 +15,8 @@ data class SavedPlanKey(
     val pinnedAt: Long = 0L,
     val createdAt: Long,
     val lastUpdatedAt: Long? = null,
+    val cachedStartAt: String? = null,
+    val cachedEndAt: String? = null,
     val cachedDayWindowEndAt: String? = null,
     val cachedWeekWindowEndAt: String? = null,
     val cachedUsage: PlanUsageSnapshot? = null
@@ -24,7 +26,7 @@ data class SavedPlanKey(
  * 说明：订阅用量页面需要长期缓存的展示数据，避免接口暂时失败时清空已有卡片内容。
  *
  * @作者 huangssh
- * @版本 1.1
+ * @版本 2.0
  */
 data class PlanUsageSnapshot(
     val planName: String?,

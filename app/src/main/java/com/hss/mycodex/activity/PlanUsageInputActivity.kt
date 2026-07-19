@@ -9,6 +9,7 @@ import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -48,7 +49,7 @@ import java.util.UUID
  * 说明：订阅 Key 用量查询页，支持本地保存多个 Key 并集中查看额度。
  *
  * @作者 huangssh
- * @版本 1.1
+ * @版本 2.0
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 
@@ -389,6 +390,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
                     apiKey = apiKey,
                     createdAt = now,
                     lastUpdatedAt = now,
+                    cachedStartAt = result.usage?.startAt,
+                    cachedEndAt = result.usage?.endAt,
                     cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
                     cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
                     cachedUsage = result.usage
@@ -450,8 +453,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
         updatePlanKey(keyId) { planKey ->
             planKey.copy(
                 lastUpdatedAt = System.currentTimeMillis(),
-                cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
-                cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
+                cachedStartAt = result.usage?.startAt ?: planKey.cachedStartAt,
+                cachedEndAt = result.usage?.endAt ?: planKey.cachedEndAt,
+                cachedDayWindowEndAt = result.usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
+                cachedWeekWindowEndAt = result.usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
                 cachedUsage = result.usage
             )
         }
@@ -594,14 +599,14 @@ class PlanUsageInputActivity : AppCompatActivity() {
                     topMargin = 10.dp
                 }
             })
-            addCachedWindowRows(card, planKey)
+            addCachedTimeRows(card, planKey)
             addLastUpdatedRow(card, planKey.lastUpdatedAt)
             return
         }
         addRow(card, "套餐", usage.planName ?: "--")
         addRow(card, "类型/状态", "${usage.type ?: "--"} / ${usage.status ?: "--"}")
-        addRow(card, "开始时间", formatBeijingTime(usage.startAt))
-        addRow(card, "到期时间", formatBeijingTime(usage.endAt))
+        addRow(card, "开始时间", formatBeijingTime(usage.startAt ?: planKey.cachedStartAt))
+        addRow(card, "到期时间", formatBeijingTime(usage.endAt ?: planKey.cachedEndAt))
         if (usage.hasCycleUsage()) {
             addSectionTitle(card, "周期订阅")
             addUsageProgress(card, "日额度", usage.dailyUsedUsd, usage.dailyLimitUsd, usage.dailyRemainingUsd)
@@ -629,9 +634,11 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 无订阅或刷新失败时仍保留旧窗口信息，避免用户无法判断下一次额度恢复时间。
+     * 无订阅或刷新失败时仍展示已缓存的订阅周期和窗口时间，避免关键时间信息随额度耗尽消失。
      */
-    private fun addCachedWindowRows(card: LinearLayout, planKey: SavedPlanKey) {
+    private fun addCachedTimeRows(card: LinearLayout, planKey: SavedPlanKey) {
+        addRow(card, "开始时间", formatBeijingTime(planKey.cachedStartAt))
+        addRow(card, "到期时间", formatBeijingTime(planKey.cachedEndAt))
         addRow(card, "日窗口结束", formatWindowEndAt(planKey.cachedDayWindowEndAt))
         addRow(card, "周窗口结束", formatWindowEndAt(planKey.cachedWeekWindowEndAt))
     }
@@ -745,6 +752,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
             try {
                 PlanUsageQueryResult(requestUsage(apiKey), null)
             } catch (throwable: Throwable) {
+                // 保留完整证书与网络异常链，便于通过 Logcat 定位客户端 TLS 失败原因。
+                Log.e(PLAN_USAGE_LOG_TAG, "订阅额度查询失败", throwable)
                 PlanUsageQueryResult(null, throwable.message ?: "查询失败")
             }
         }
@@ -1284,6 +1293,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
     )
 
     companion object {
+        /**
+         * 订阅额度请求的 Logcat Tag，不包含 Key 等鉴权信息。
+         */
+        private const val PLAN_USAGE_LOG_TAG = "PlanUsageQuery"
         private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
         private const val PROGRESS_WEIGHT_TOTAL = 1000f

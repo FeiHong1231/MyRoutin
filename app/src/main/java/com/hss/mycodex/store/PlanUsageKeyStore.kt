@@ -12,7 +12,7 @@ import java.util.UUID
  * 说明：订阅 Key 列表的 SP 存储入口，负责旧单 Key 数据的无感迁移和每张卡片状态恢复。
  *
  * @作者 huangssh
- * @版本 2.0
+ * @版本 2.1
  */
 class PlanUsageKeyStore(context: Context) {
 
@@ -55,6 +55,7 @@ class PlanUsageKeyStore(context: Context) {
             name = DEFAULT_KEY_NAME,
             apiKey = legacyApiKey,
             createdAt = System.currentTimeMillis(),
+            sortOrder = 0,
             cachedDayWindowEndAt = preferences.getString(PREF_KEY_DAY_WINDOW_END_AT, null),
             cachedWeekWindowEndAt = preferences.getString(PREF_KEY_WEEK_WINDOW_END_AT, null)
         )
@@ -78,13 +79,14 @@ class PlanUsageKeyStore(context: Context) {
                     put("name", key.name)
                     put("apiKey", key.apiKey)
                     put("isExpanded", key.isExpanded)
-                    put("isPinned", key.isPinned)
-                    put("pinnedAt", key.pinnedAt)
                     put("createdAt", key.createdAt)
+                    put("sortOrder", key.sortOrder)
                     putNullable("lastUpdatedAt", key.lastUpdatedAt)
                     putNullable("cachedStartAt", key.cachedStartAt)
                     putNullable("cachedEndAt", key.cachedEndAt)
+                    putNullable("cachedDayWindowStartAt", key.cachedDayWindowStartAt)
                     putNullable("cachedDayWindowEndAt", key.cachedDayWindowEndAt)
+                    putNullable("cachedWeekWindowStartAt", key.cachedWeekWindowStartAt)
                     putNullable("cachedWeekWindowEndAt", key.cachedWeekWindowEndAt)
                     putNullable("cachedUsage", key.cachedUsage?.toJsonObject())
                 })
@@ -93,13 +95,33 @@ class PlanUsageKeyStore(context: Context) {
     }
 
     /**
-     * 读取异常时返回空列表，避免损坏的本地 JSON 阻塞页面启动。
+     * 旧版本缺少排序字段时，按原来的置顶规则生成顺序号并立即回写，确保升级后卡片顺序不变。
      */
     private fun decodeKeys(json: String): List<SavedPlanKey> {
         return runCatching {
             val jsonArray = JSONArray(json)
-            (0 until jsonArray.length()).mapNotNull { index ->
-                jsonArray.optJSONObject(index)?.toSavedPlanKey()
+            val decodedKeys = (0 until jsonArray.length()).mapNotNull { index ->
+                val jsonObject = jsonArray.optJSONObject(index) ?: return@mapNotNull null
+                jsonObject.toSavedPlanKey()?.let { key ->
+                    DecodedPlanKey(
+                        key = key,
+                        legacyIsPinned = jsonObject.optBoolean("isPinned", false),
+                        originalIndex = index
+                    )
+                }
+            }
+            if (decodedKeys.any { it.key.sortOrder == MISSING_SORT_ORDER }) {
+                val migratedKeys = decodedKeys.sortedWith(
+                    compareByDescending<DecodedPlanKey> { it.legacyIsPinned }
+                        .thenBy { it.key.createdAt }
+                        .thenBy { it.originalIndex }
+                ).mapIndexed { sortOrder, decodedKey ->
+                    decodedKey.key.copy(sortOrder = sortOrder)
+                }
+                saveKeys(migratedKeys)
+                migratedKeys
+            } else {
+                decodedKeys.map { it.key }
             }
         }.getOrDefault(emptyList())
     }
@@ -115,13 +137,14 @@ class PlanUsageKeyStore(context: Context) {
             name = stringOrNull("name") ?: DEFAULT_KEY_NAME,
             apiKey = apiKey,
             isExpanded = optBoolean("isExpanded", true),
-            isPinned = optBoolean("isPinned", false),
-            pinnedAt = optLong("pinnedAt", 0L),
             createdAt = optLong("createdAt", 0L),
+            sortOrder = optInt("sortOrder", MISSING_SORT_ORDER),
             lastUpdatedAt = longOrNull("lastUpdatedAt"),
             cachedStartAt = stringOrNull("cachedStartAt"),
             cachedEndAt = stringOrNull("cachedEndAt"),
+            cachedDayWindowStartAt = stringOrNull("cachedDayWindowStartAt"),
             cachedDayWindowEndAt = stringOrNull("cachedDayWindowEndAt"),
+            cachedWeekWindowStartAt = stringOrNull("cachedWeekWindowStartAt"),
             cachedWeekWindowEndAt = stringOrNull("cachedWeekWindowEndAt"),
             cachedUsage = optJSONObject("cachedUsage")?.toPlanUsageSnapshot()
         )
@@ -143,7 +166,9 @@ class PlanUsageKeyStore(context: Context) {
             weeklyUsedUsd = doubleOrNull("weeklyUsedUsd"),
             dailyRemainingUsd = doubleOrNull("dailyRemainingUsd"),
             weeklyRemainingUsd = doubleOrNull("weeklyRemainingUsd"),
+            dayWindowStartAt = stringOrNull("dayWindowStartAt"),
             dayWindowEndAt = stringOrNull("dayWindowEndAt"),
+            weekWindowStartAt = stringOrNull("weekWindowStartAt"),
             weekWindowEndAt = stringOrNull("weekWindowEndAt"),
             totalTokens = longOrNull("totalTokens"),
             consumedTokens = longOrNull("consumedTokens"),
@@ -171,7 +196,9 @@ class PlanUsageKeyStore(context: Context) {
             putNullable("weeklyUsedUsd", weeklyUsedUsd)
             putNullable("dailyRemainingUsd", dailyRemainingUsd)
             putNullable("weeklyRemainingUsd", weeklyRemainingUsd)
+            putNullable("dayWindowStartAt", dayWindowStartAt)
             putNullable("dayWindowEndAt", dayWindowEndAt)
+            putNullable("weekWindowStartAt", weekWindowStartAt)
             putNullable("weekWindowEndAt", weekWindowEndAt)
             putNullable("totalTokens", totalTokens)
             putNullable("consumedTokens", consumedTokens)
@@ -224,6 +251,15 @@ class PlanUsageKeyStore(context: Context) {
         }.toMap()
     }
 
+    /**
+     * 读取时暂存旧置顶状态，仅用于将 2.0 及更早版本的显示顺序迁移为自由排序。
+     */
+    private data class DecodedPlanKey(
+        val key: SavedPlanKey,
+        val legacyIsPinned: Boolean,
+        val originalIndex: Int
+    )
+
     private companion object {
         private const val PREFS_NAME = "plan_usage_input_cache"
         private const val PREF_KEY_PLAN_KEYS = "plan_keys"
@@ -231,5 +267,6 @@ class PlanUsageKeyStore(context: Context) {
         private const val PREF_KEY_DAY_WINDOW_END_AT = "day_window_end_at"
         private const val PREF_KEY_WEEK_WINDOW_END_AT = "week_window_end_at"
         private const val DEFAULT_KEY_NAME = "默认 Key"
+        private const val MISSING_SORT_ORDER = -1
     }
 }

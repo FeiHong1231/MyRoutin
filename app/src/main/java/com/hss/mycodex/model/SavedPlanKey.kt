@@ -4,20 +4,21 @@ package com.hss.mycodex.model
  * 说明：本地保存的订阅 Key 条目，承载列表排序、卡片展开状态和最近一次成功查询结果。
  *
  * @作者 huangssh
- * @版本 2.0
+ * @版本 2.1
  */
 data class SavedPlanKey(
     val id: String,
     val name: String,
     val apiKey: String,
     val isExpanded: Boolean = true,
-    val isPinned: Boolean = false,
-    val pinnedAt: Long = 0L,
     val createdAt: Long,
+    val sortOrder: Int = 0,
     val lastUpdatedAt: Long? = null,
     val cachedStartAt: String? = null,
     val cachedEndAt: String? = null,
+    val cachedDayWindowStartAt: String? = null,
     val cachedDayWindowEndAt: String? = null,
+    val cachedWeekWindowStartAt: String? = null,
     val cachedWeekWindowEndAt: String? = null,
     val cachedUsage: PlanUsageSnapshot? = null
 )
@@ -26,7 +27,7 @@ data class SavedPlanKey(
  * 说明：订阅用量页面需要长期缓存的展示数据，避免接口暂时失败时清空已有卡片内容。
  *
  * @作者 huangssh
- * @版本 2.0
+ * @版本 2.1
  */
 data class PlanUsageSnapshot(
     val planName: String?,
@@ -40,7 +41,9 @@ data class PlanUsageSnapshot(
     val weeklyUsedUsd: Double?,
     val dailyRemainingUsd: Double?,
     val weeklyRemainingUsd: Double?,
+    val dayWindowStartAt: String?,
     val dayWindowEndAt: String?,
+    val weekWindowStartAt: String?,
     val weekWindowEndAt: String?,
     val totalTokens: Long?,
     val consumedTokens: Long?,

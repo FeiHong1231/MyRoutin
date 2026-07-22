@@ -42,6 +42,7 @@ class PlanUsageKeyAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PlanUsageKeyViewHolder {
         val card = LinearLayout(parent.context).apply {
             orientation = LinearLayout.VERTICAL
+            // 卡片纵向更紧凑，左右保留更宽的操作安全边距。
             setPadding(16.dp, 14.dp, 16.dp, 14.dp)
             background = GradientDrawable().apply {
                 cornerRadius = 10.dp.toFloat()

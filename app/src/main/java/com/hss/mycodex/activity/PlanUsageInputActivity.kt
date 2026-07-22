@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.Gravity
@@ -49,7 +50,7 @@ import java.util.UUID
  * 说明：订阅 Key 用量查询页，支持本地保存多个 Key 并集中查看额度。
  *
  * @作者 huangssh
- * @版本 2.0
+ * @版本 2.1
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 
@@ -389,10 +390,13 @@ class PlanUsageInputActivity : AppCompatActivity() {
                     name = name,
                     apiKey = apiKey,
                     createdAt = now,
+                    sortOrder = nextPlanKeySortOrder(),
                     lastUpdatedAt = now,
                     cachedStartAt = result.usage?.startAt,
                     cachedEndAt = result.usage?.endAt,
+                    cachedDayWindowStartAt = result.usage?.dayWindowStartAt,
                     cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
+                    cachedWeekWindowStartAt = result.usage?.weekWindowStartAt,
                     cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
                     cachedUsage = result.usage
                 )
@@ -455,7 +459,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 lastUpdatedAt = System.currentTimeMillis(),
                 cachedStartAt = result.usage?.startAt ?: planKey.cachedStartAt,
                 cachedEndAt = result.usage?.endAt ?: planKey.cachedEndAt,
+                cachedDayWindowStartAt = result.usage?.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
                 cachedDayWindowEndAt = result.usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
+                cachedWeekWindowStartAt = result.usage?.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
                 cachedWeekWindowEndAt = result.usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
                 cachedUsage = result.usage
             )
@@ -463,17 +469,24 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 卡片展示顺序固定为置顶在前，组内按添加时间正序，后添加的 Key 会自然排在列表后面。
+     * 卡片按用户保存的顺序号展示，排序号相同时再按添加时间兜底，避免异常数据导致顺序不稳定。
      */
     private fun sortedPlanKeys(): List<SavedPlanKey> {
         return savedPlanKeys.sortedWith(
-            compareByDescending<SavedPlanKey> { it.isPinned }
+            compareBy<SavedPlanKey> { it.sortOrder }
                 .thenBy { it.createdAt }
         )
     }
 
     /**
-     * 更新一项后立即写入 SP，保证展开、置顶、命名和刷新缓存关闭 App 后仍能恢复。
+     * 新添加的 Key 始终使用当前最大排序号，保证其显示在列表末尾。
+     */
+    private fun nextPlanKeySortOrder(): Int {
+        return (savedPlanKeys.maxOfOrNull { it.sortOrder } ?: -1) + 1
+    }
+
+    /**
+     * 更新一项后立即写入 SP，保证展开、排序、命名和刷新缓存关闭 App 后仍能恢复。
      * @param keyId 需要更新的 Key ID
      * @param transform 基于旧条目生成新条目的变换
      */
@@ -484,6 +497,31 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
         savedPlanKeys[index] = transform(savedPlanKeys[index])
         planUsageKeyStore.saveKeys(savedPlanKeys)
+    }
+
+    /**
+     * 与目标相邻卡片交换排序号，实现一次只移动一位且保留其他卡片顺序。
+     * @param keyId 需要移动的 Key ID
+     * @param moveOffset 上移为 -1，下移为 1
+     */
+    private fun movePlanKeyByOne(keyId: String, moveOffset: Int) {
+        val orderedKeys = sortedPlanKeys()
+        val currentPosition = orderedKeys.indexOfFirst { it.id == keyId }
+        val targetPosition = currentPosition + moveOffset
+        if (currentPosition < 0 || targetPosition !in orderedKeys.indices) {
+            return
+        }
+        val currentKey = orderedKeys[currentPosition]
+        val targetKey = orderedKeys[targetPosition]
+        val currentIndex = savedPlanKeys.indexOfFirst { it.id == currentKey.id }
+        val targetIndex = savedPlanKeys.indexOfFirst { it.id == targetKey.id }
+        if (currentIndex < 0 || targetIndex < 0) {
+            return
+        }
+        savedPlanKeys[currentIndex] = currentKey.copy(sortOrder = targetKey.sortOrder)
+        savedPlanKeys[targetIndex] = targetKey.copy(sortOrder = currentKey.sortOrder)
+        planUsageKeyStore.saveKeys(savedPlanKeys)
+        renderPage()
     }
 
     /**
@@ -502,7 +540,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private fun renderPlanKeyCard(card: LinearLayout, planKey: SavedPlanKey, isRefreshing: Boolean) {
         card.removeAllViews()
         val header = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
+            // 操作区顶部对齐标题，避免标题高度变化时按钮纵向漂移。
+            gravity = Gravity.TOP
             orientation = LinearLayout.HORIZONTAL
             isClickable = true
             setOnClickListener {
@@ -514,7 +553,28 @@ class PlanUsageInputActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        titleColumn.addView(createText(planKey.name, 18f, R.color.gray_212121, true))
+        val titleRow = LinearLayout(this).apply {
+            gravity = Gravity.BOTTOM
+            orientation = LinearLayout.HORIZONTAL
+        }
+        titleRow.addView(createText(planKey.name, 18f, R.color.gray_212121, true).apply {
+            ellipsize = TextUtils.TruncateAt.END
+            isSingleLine = true
+            // 为右侧操作预留空间，避免窄屏下标题挤压卡片操作入口。
+            maxWidth = 170.dp
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        })
+        titleRow.addView(createText("正在刷新...", 12f, R.color.blue_2771fa, false).apply {
+            isSingleLine = true
+            visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
+            layoutParams = LinearLayout.LayoutParams(64.dp, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = 6.dp
+            }
+        })
+        titleColumn.addView(titleRow)
         titleColumn.addView(createText(maskKey(planKey.apiKey), 12f, R.color.gray_999999, false).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -524,16 +584,28 @@ class PlanUsageInputActivity : AppCompatActivity() {
             }
         })
         val toggleView = createText(if (planKey.isExpanded) "收起" else "展开", 13f, R.color.blue_2771fa, false).apply {
-            setPadding(8.dp, 8.dp, 4.dp, 8.dp)
+            background = createCardActionBackgroundDrawable()
+            setPadding(10.dp, 0, 10.dp, 0)
             gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                32.dp
+            )
             setOnClickListener {
                 updatePlanKey(planKey.id) { it.copy(isExpanded = !it.isExpanded) }
                 renderPage()
             }
         }
         val manageView = createText("管理", 13f, R.color.blue_2771fa, false).apply {
-            setPadding(8.dp, 8.dp, 0, 8.dp)
+            background = createCardActionBackgroundDrawable()
+            setPadding(10.dp, 0, 10.dp, 0)
             gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                32.dp
+            ).apply {
+                marginStart = 6.dp
+            }
             setOnClickListener { showPlanKeyMenu(this, planKey) }
         }
         val actionRow = LinearLayout(this).apply {
@@ -546,16 +618,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
         header.addView(actionRow)
         card.addView(header)
 
-        if (isRefreshing) {
-            card.addView(createText("正在刷新...", 13f, R.color.blue_2771fa, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            })
-        }
         latestErrorByKeyId[planKey.id]?.let { error ->
             card.addView(createText("本次刷新失败：$error，保留上次数据", 13f, R.color.orange_fe5d36, false).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -608,11 +670,21 @@ class PlanUsageInputActivity : AppCompatActivity() {
         addRow(card, "开始时间", formatBeijingTime(usage.startAt ?: planKey.cachedStartAt))
         addRow(card, "到期时间", formatBeijingTime(usage.endAt ?: planKey.cachedEndAt))
         if (usage.hasCycleUsage()) {
+            val dayWindowLabel = resolveWindowLabel(
+                usage.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
+                usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
+                FALLBACK_SHORT_CYCLE_LABEL
+            )
+            val weekWindowLabel = resolveWindowLabel(
+                usage.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
+                usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
+                FALLBACK_WEEK_CYCLE_LABEL
+            )
             addSectionTitle(card, "周期订阅")
-            addUsageProgress(card, "日额度", usage.dailyUsedUsd, usage.dailyLimitUsd, usage.dailyRemainingUsd)
-            addUsageProgress(card, "周额度", usage.weeklyUsedUsd, usage.weeklyLimitUsd, usage.weeklyRemainingUsd)
-            addRow(card, "日窗口结束", formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt))
-            addRow(card, "周窗口结束", formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt))
+            addUsageProgress(card, "${dayWindowLabel}额度", usage.dailyUsedUsd, usage.dailyLimitUsd, usage.dailyRemainingUsd)
+            addUsageProgress(card, "${weekWindowLabel}额度", usage.weeklyUsedUsd, usage.weeklyLimitUsd, usage.weeklyRemainingUsd)
+            addRow(card, "${dayWindowLabel}窗口结束", formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt))
+            addRow(card, "${weekWindowLabel}窗口结束", formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt))
         }
         if (usage.hasResourceUsage()) {
             addSectionTitle(card, "资源包套餐")
@@ -637,10 +709,20 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * 无订阅或刷新失败时仍展示已缓存的订阅周期和窗口时间，避免关键时间信息随额度耗尽消失。
      */
     private fun addCachedTimeRows(card: LinearLayout, planKey: SavedPlanKey) {
+        val dayWindowLabel = resolveWindowLabel(
+            planKey.cachedDayWindowStartAt,
+            planKey.cachedDayWindowEndAt,
+            FALLBACK_SHORT_CYCLE_LABEL
+        )
+        val weekWindowLabel = resolveWindowLabel(
+            planKey.cachedWeekWindowStartAt,
+            planKey.cachedWeekWindowEndAt,
+            FALLBACK_WEEK_CYCLE_LABEL
+        )
         addRow(card, "开始时间", formatBeijingTime(planKey.cachedStartAt))
         addRow(card, "到期时间", formatBeijingTime(planKey.cachedEndAt))
-        addRow(card, "日窗口结束", formatWindowEndAt(planKey.cachedDayWindowEndAt))
-        addRow(card, "周窗口结束", formatWindowEndAt(planKey.cachedWeekWindowEndAt))
+        addRow(card, "${dayWindowLabel}窗口结束", formatWindowEndAt(planKey.cachedDayWindowEndAt))
+        addRow(card, "${weekWindowLabel}窗口结束", formatWindowEndAt(planKey.cachedWeekWindowEndAt))
     }
 
     /**
@@ -652,30 +734,25 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 管理菜单只提供置顶、命名和删除，刻意不加入单卡刷新以保持用户确认的整体刷新规则。
+     * 管理菜单提供单步排序、命名和删除，刻意不加入单卡刷新以保持用户确认的整体刷新规则。
      */
     private fun showPlanKeyMenu(anchor: View, planKey: SavedPlanKey) {
         if (isRefreshingAll) {
             MyToastD.show("正在刷新全部 Key")
             return
         }
+        val currentPosition = sortedPlanKeys().indexOfFirst { it.id == planKey.id }
         PopupMenu(this, anchor).apply {
-            menu.add(0, MENU_PIN, 0, if (planKey.isPinned) "取消置顶" else "置顶")
-            menu.add(0, MENU_RENAME, 1, "重命名")
-            menu.add(0, MENU_DELETE, 2, "删除")
+            menu.add(0, MENU_MOVE_UP, 0, "上移一位").isEnabled = currentPosition > 0
+            menu.add(0, MENU_MOVE_DOWN, 1, "下移一位").isEnabled = currentPosition in 0 until savedPlanKeys.lastIndex
+            menu.add(0, MENU_RENAME, 2, "重命名")
+            menu.add(0, MENU_DELETE, 3, "删除")
             setOnMenuItemClickListener { menuItem ->
                 when (menuItem.itemId) {
-                    MENU_PIN -> updatePlanKey(planKey.id) {
-                        it.copy(
-                            isPinned = !it.isPinned,
-                            pinnedAt = if (it.isPinned) 0L else System.currentTimeMillis()
-                        )
-                    }
+                    MENU_MOVE_UP -> movePlanKeyByOne(planKey.id, MOVE_OFFSET_UP)
+                    MENU_MOVE_DOWN -> movePlanKeyByOne(planKey.id, MOVE_OFFSET_DOWN)
                     MENU_RENAME -> showRenameDialog(planKey)
                     MENU_DELETE -> showDeleteDialog(planKey)
-                }
-                if (menuItem.itemId == MENU_PIN) {
-                    renderPage()
                 }
                 true
             }
@@ -830,7 +907,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
             weeklyUsedUsd = jsonObject.doubleOrNull("weeklyUsedUsd"),
             dailyRemainingUsd = jsonObject.doubleOrNull("dailyRemainingUsd"),
             weeklyRemainingUsd = jsonObject.doubleOrNull("weeklyRemainingUsd"),
+            dayWindowStartAt = jsonObject.stringOrNull("dayWindowStartAt"),
             dayWindowEndAt = jsonObject.stringOrNull("dayWindowEndAt"),
+            weekWindowStartAt = jsonObject.stringOrNull("weekWindowStartAt"),
             weekWindowEndAt = jsonObject.stringOrNull("weekWindowEndAt"),
             totalTokens = jsonObject.longOrNull("totalTokens"),
             consumedTokens = jsonObject.longOrNull("consumedTokens"),
@@ -849,6 +928,16 @@ class PlanUsageInputActivity : AppCompatActivity() {
         return GradientDrawable().apply {
             cornerRadius = 10.dp.toFloat()
             setColor(getColorCompat(R.color.white))
+        }
+    }
+
+    /**
+     * 卡片操作使用浅蓝圆角底色，明确点击边界但不抢占 Key 名称和额度信息的视觉层级。
+     */
+    private fun createCardActionBackgroundDrawable(): GradientDrawable {
+        return GradientDrawable().apply {
+            cornerRadius = 8.dp.toFloat()
+            setColor(getColorCompat(R.color.blue_e8f0ff))
         }
     }
 
@@ -1119,6 +1208,30 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
+     * 根据服务端返回的窗口起止时间确定展示周期，接口调整重置频率时不再依赖固定的日/周文案。
+     * @param windowStartAt 服务端窗口开始时间
+     * @param windowEndAt 服务端窗口结束时间
+     * @param fallbackLabel 旧缓存缺少开始时间时的保守展示名称
+     */
+    private fun resolveWindowLabel(windowStartAt: String?, windowEndAt: String?, fallbackLabel: String): String {
+        val startTime = parseWindowEndAt(windowStartAt)?.time ?: return fallbackLabel
+        val endTime = parseWindowEndAt(windowEndAt)?.time ?: return fallbackLabel
+        val durationMinutes = (endTime - startTime) / MILLIS_PER_MINUTE
+        if (durationMinutes <= 0L) {
+            return fallbackLabel
+        }
+        return when (durationMinutes) {
+            MINUTES_PER_DAY -> "日"
+            MINUTES_PER_WEEK -> "周"
+            else -> when {
+                durationMinutes % MINUTES_PER_DAY == 0L -> "${durationMinutes / MINUTES_PER_DAY}天"
+                durationMinutes % MINUTES_PER_HOUR == 0L -> "${durationMinutes / MINUTES_PER_HOUR}小时"
+                else -> "${durationMinutes}分钟"
+            }
+        }
+    }
+
+    /**
      * 将服务端 UTC 窗口结束时间固定展示为北京时间。
      */
     private fun formatBeijingTime(windowEndAt: String?): String {
@@ -1300,9 +1413,18 @@ class PlanUsageInputActivity : AppCompatActivity() {
         private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
         private const val PROGRESS_WEIGHT_TOTAL = 1000f
-        private const val MENU_PIN = 1
-        private const val MENU_RENAME = 2
-        private const val MENU_DELETE = 3
+        private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"
+        private const val FALLBACK_WEEK_CYCLE_LABEL = "周"
+        private const val MILLIS_PER_MINUTE = 60_000L
+        private const val MINUTES_PER_HOUR = 60L
+        private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
+        private const val MINUTES_PER_WEEK = 7L * MINUTES_PER_DAY
+        private const val MENU_MOVE_UP = 1
+        private const val MENU_MOVE_DOWN = 2
+        private const val MENU_RENAME = 3
+        private const val MENU_DELETE = 4
+        private const val MOVE_OFFSET_UP = -1
+        private const val MOVE_OFFSET_DOWN = 1
         /**
          * 分组默认倍率基线，用于判断接口返回倍率是否低于常规值。
          */

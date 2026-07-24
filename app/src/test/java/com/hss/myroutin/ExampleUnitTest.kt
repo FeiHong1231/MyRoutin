@@ -1,4 +1,4 @@
-package com.hss.mycodex
+package com.hss.myroutin
 
 import org.junit.Test
 

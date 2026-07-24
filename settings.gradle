@@ -29,5 +29,5 @@ dependencyResolutionManagement {
         maven { url 'https://maven.aliyun.com/repository/central' }
     }
 }
-rootProject.name = "MyCodex"
+rootProject.name = "MyRoutin"
 include ':app'

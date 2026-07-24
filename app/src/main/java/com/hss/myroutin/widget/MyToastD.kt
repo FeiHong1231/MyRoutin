@@ -1,7 +1,7 @@
-package com.hss.mycodex.widget
+package com.hss.myroutin.widget
 
 import android.widget.Toast
-import com.hss.mycodex.MyCodexApplication
+import com.hss.myroutin.MyRoutinApplication
 
 /**
  * 说明：本地工具页统一 Toast 入口，避免页面内重复维护 Toast 上下文和防连点逻辑。
@@ -34,7 +34,7 @@ object MyToastD {
             return
         }
         toast?.cancel()
-        toast = Toast.makeText(MyCodexApplication.appContext, text, duration).apply {
+        toast = Toast.makeText(MyRoutinApplication.appContext, text, duration).apply {
             show()
         }
     }

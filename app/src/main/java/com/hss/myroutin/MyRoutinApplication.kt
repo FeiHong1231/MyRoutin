@@ -1,4 +1,4 @@
-package com.hss.mycodex
+package com.hss.myroutin
 
 import android.app.Application
 import android.content.Context
@@ -9,7 +9,7 @@ import android.content.Context
  * @作者 huangssh
  * @版本 1.0
  */
-class MyCodexApplication : Application() {
+class MyRoutinApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()

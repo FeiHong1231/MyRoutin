@@ -3,12 +3,26 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// 签名信息仅保存在开发者本机，避免私钥与密码进入源码仓库。
+def releaseSigningPropertiesFile = rootProject.file('keystore.properties')
+def releaseSigningProperties = new Properties()
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { inputStream ->
+        releaseSigningProperties.load(inputStream)
+    }
+    def requiredSigningKeys = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+    def missingSigningKeys = requiredSigningKeys.findAll { !releaseSigningProperties[it] }
+    if (!missingSigningKeys.isEmpty()) {
+        throw new GradleException("keystore.properties 缺少配置项：${missingSigningKeys.join(', ')}")
+    }
+}
+
 android {
-    namespace 'com.hss.mycodex'
+    namespace 'com.hss.myroutin'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.hss.mycodex"
+        applicationId "com.hss.myroutin"
         minSdk 24
         targetSdk 34
         versionCode 3
@@ -20,8 +34,21 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            // 未配置时保留空配置，使 assembleRelease 明确报错，禁止误发 debug 签名包。
+            if (releaseSigningPropertiesFile.exists()) {
+                storeFile rootProject.file(releaseSigningProperties['storeFile'])
+                storePassword releaseSigningProperties['storePassword']
+                keyAlias releaseSigningProperties['keyAlias']
+                keyPassword releaseSigningProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

@@ -1,4 +1,4 @@
-package com.hss.mycodex.widget
+package com.hss.myroutin.widget
 
 import android.content.Context
 import android.content.res.Resources

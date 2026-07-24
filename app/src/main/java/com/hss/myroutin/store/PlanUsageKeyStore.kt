@@ -1,9 +1,9 @@
-package com.hss.mycodex.store
+package com.hss.myroutin.store
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.hss.mycodex.model.PlanUsageSnapshot
-import com.hss.mycodex.model.SavedPlanKey
+import com.hss.myroutin.model.PlanUsageSnapshot
+import com.hss.myroutin.model.SavedPlanKey
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID

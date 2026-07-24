@@ -1,12 +1,12 @@
-package com.hss.mycodex.adapter
+package com.hss.myroutin.adapter
 
 import android.graphics.drawable.GradientDrawable
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
-import com.hss.mycodex.R
-import com.hss.mycodex.model.SavedPlanKey
-import com.hss.mycodex.widget.dp
+import com.hss.myroutin.R
+import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.widget.dp
 
 /**
  * 说明：订阅 Key 卡片列表适配器，仅复用卡片容器；具体业务内容由页面按 Key 状态渲染。

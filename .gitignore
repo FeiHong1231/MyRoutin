@@ -14,4 +14,9 @@
 /captures
 .externalNativeBuild
 .cxx
+
+# Release signing private material must stay outside Git.
+/keystore.properties
+*.jks
+*.keystore
 local.properties

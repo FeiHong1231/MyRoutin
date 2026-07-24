@@ -1,4 +1,4 @@
-package com.hss.mycodex.activity
+package com.hss.myroutin.activity
 
 import android.content.Context
 import android.content.ClipboardManager
@@ -25,13 +25,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.hss.mycodex.R
-import com.hss.mycodex.adapter.PlanUsageKeyAdapter
-import com.hss.mycodex.model.PlanUsageSnapshot
-import com.hss.mycodex.model.SavedPlanKey
-import com.hss.mycodex.store.PlanUsageKeyStore
-import com.hss.mycodex.widget.MyToastD
-import com.hss.mycodex.widget.dp
+import com.hss.myroutin.R
+import com.hss.myroutin.adapter.PlanUsageKeyAdapter
+import com.hss.myroutin.model.PlanUsageSnapshot
+import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.store.PlanUsageKeyStore
+import com.hss.myroutin.widget.MyToastD
+import com.hss.myroutin.widget.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

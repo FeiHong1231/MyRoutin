@@ -1,4 +1,4 @@
-package com.hss.mycodex.model
+package com.hss.myroutin.model
 
 /**
  * 说明：本地保存的订阅 Key 条目，承载列表排序、卡片展开状态和最近一次成功查询结果。

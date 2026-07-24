@@ -1338,7 +1338,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         if (groupIds.isEmpty()) {
             return "--"
         }
-        val greenRanges = mutableListOf<Pair<Int, Int>>()
+        val colorRanges = mutableListOf<Triple<Int, Int, Int>>()
         val textBuilder = StringBuilder()
         groupIds.forEachIndexed { index, groupId ->
             if (index > 0) {
@@ -1350,14 +1350,14 @@ class PlanUsageInputActivity : AppCompatActivity() {
             val multiplier = multiplierValue?.let { "x${usdFormatter.format(it)}" } ?: "x--"
             textBuilder.append("$groupName $multiplier")
             val end = textBuilder.length
-            if (isLowerThanDefaultGroupMultiplier(groupId, groupName, multiplierValue)) {
-                greenRanges.add(start to end)
+            resolveGroupMultiplierColorResId(groupId, groupName, multiplierValue)?.let { colorResId ->
+                colorRanges.add(Triple(start, end, colorResId))
             }
         }
         return SpannableString(textBuilder).apply {
-            greenRanges.forEach { (start, end) ->
+            colorRanges.forEach { (start, end, colorResId) ->
                 setSpan(
-                    ForegroundColorSpan(getColorCompat(R.color.green_34c759)),
+                    ForegroundColorSpan(getColorCompat(colorResId)),
                     start,
                     end,
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -1367,14 +1367,18 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 分组倍率低于默认基线时返回 true，用绿色提示用户当前分组更省。
+     * 根据分组倍率与默认基线的差异返回展示颜色：低于基线为绿色，高于基线为红色。
      * @param groupId 服务端返回的分组 ID
      * @param groupName 服务端返回的分组名称
      * @param multiplier 当前 key 对应的分组倍率
      */
-    private fun isLowerThanDefaultGroupMultiplier(groupId: String, groupName: String, multiplier: Double?): Boolean {
-        val defaultMultiplier = resolveDefaultGroupMultiplier(groupId, groupName) ?: return false
-        return multiplier != null && multiplier < defaultMultiplier
+    private fun resolveGroupMultiplierColorResId(groupId: String, groupName: String, multiplier: Double?): Int? {
+        val defaultMultiplier = resolveDefaultGroupMultiplier(groupId, groupName) ?: return null
+        return when {
+            multiplier == null || multiplier == defaultMultiplier -> null
+            multiplier < defaultMultiplier -> R.color.green_34c759
+            else -> R.color.red_ff3b30
+        }
     }
 
     /**

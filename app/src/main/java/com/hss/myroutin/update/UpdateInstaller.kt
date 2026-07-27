@@ -85,7 +85,7 @@ object UpdateInstaller {
  * 说明：系统安装请求的可展示结果，页面据此决定跳转授权、保留下载卡片或提示失败。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface UpdateInstallResult {
 

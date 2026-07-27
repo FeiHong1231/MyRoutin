@@ -119,19 +119,24 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** 从可下载或下载失败状态重新开始前台下载，重复点击不会创建并发任务。 */
+    /** 从可下载、暂停或下载失败状态开始前台下载，重复点击不会创建并发任务。 */
     fun downloadUpdate() {
-        val update = when (val cardState = _uiState.value.cardState) {
-            is AppUpdateCardState.Available -> cardState.update
-            is AppUpdateCardState.DownloadFailed -> cardState.update
+        val currentCardState = _uiState.value.cardState
+        val update = when (currentCardState) {
+            is AppUpdateCardState.Available -> currentCardState.update
+            is AppUpdateCardState.Paused -> currentCardState.update
+            is AppUpdateCardState.DownloadFailed -> currentCardState.update
             else -> return
         }
+        // 恢复下载必须沿用暂停时已渲染的进度，避免 Range 请求建立前圆环短暂回退到 0%。
+        val initialProgress = (currentCardState as? AppUpdateCardState.Paused)?.progress
+            ?: UpdateDownloadProgress(0L, update.apkSizeBytes)
         downloadUpdateJob?.cancel()
         updateUiState {
             it.copy(
                 cardState = AppUpdateCardState.Downloading(
                     update = update,
-                    progress = UpdateDownloadProgress(0L, update.apkSizeBytes)
+                    progress = initialProgress
                 )
             )
         }
@@ -160,11 +165,53 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                         it.copy(cardState = AppUpdateCardState.DownloadFailed(update, result.userMessage))
                     }
                 }
+
+                is AppUpdateDownloadResult.Paused -> {
+                    updateUiState { state ->
+                        when (val cardState = state.cardState) {
+                            is AppUpdateCardState.Downloading -> {
+                                if (cardState.update == update) {
+                                    state.copy(cardState = AppUpdateCardState.Paused(update, result.progress))
+                                } else {
+                                    state
+                                }
+                            }
+
+                            is AppUpdateCardState.Paused -> {
+                                if (cardState.update == update) {
+                                    state.copy(cardState = cardState.copy(progress = result.progress))
+                                } else {
+                                    state
+                                }
+                            }
+
+                            else -> state
+                        }
+                    }
+                }
             }
         }
     }
 
-    /** 用户主动关闭下载卡片时取消任务，并回收已下载但尚未安装的临时 APK。 */
+    /** 切换下载的暂停与继续状态，暂停保留当前临时文件，继续通过 Repository 发起断点请求。 */
+    fun toggleDownloadPause() {
+        when (val cardState = _uiState.value.cardState) {
+            is AppUpdateCardState.Downloading -> {
+                if (downloadUpdateJob?.isActive != true) {
+                    return
+                }
+                repository.pauseForegroundDownload()
+                updateUiState {
+                    it.copy(cardState = AppUpdateCardState.Paused(cardState.update, cardState.progress))
+                }
+            }
+
+            is AppUpdateCardState.Paused -> downloadUpdate()
+            else -> Unit
+        }
+    }
+
+    /** 用户主动关闭下载卡片时取消任务，并回收已下载、暂停或未完成的临时 APK。 */
     fun dismissUpdateCard() {
         if (_uiState.value.isChecking) {
             repository.cancelUpdateCheck()
@@ -175,6 +222,12 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
             is AppUpdateCardState.Downloading -> {
                 repository.cancelForegroundDownload()
                 downloadUpdateJob?.cancel()
+            }
+
+            is AppUpdateCardState.Paused -> {
+                repository.cancelForegroundDownload()
+                downloadUpdateJob?.cancel()
+                repository.deletePartialUpdate(cardState.update)
             }
 
             is AppUpdateCardState.Downloaded -> repository.deleteCachedUpdate(cardState.apkFile)
@@ -194,6 +247,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         val downloadingState = _uiState.value.cardState as? AppUpdateCardState.Downloading ?: return
         repository.cancelForegroundDownload()
         downloadUpdateJob?.cancel()
+        repository.deletePartialUpdate(downloadingState.update)
         updateUiState { it.copy(cardState = AppUpdateCardState.Available(downloadingState.update)) }
     }
 
@@ -230,7 +284,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
  * 说明：更新卡片持续状态，空闲时不占首页空间，下载过程与安装入口均由同一张卡片承载。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 data class AppUpdateUiState(
     val isChecking: Boolean = false,
@@ -243,7 +297,7 @@ data class AppUpdateUiState(
  * 说明：更新卡片的可视状态，前台下载被取消或失败后始终保留可重新下载的版本信息。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface AppUpdateCardState {
 
@@ -255,6 +309,12 @@ sealed interface AppUpdateCardState {
 
     /** 仅在首页前台显示的实时下载进度。 */
     data class Downloading(
+        val update: AppUpdateManifest,
+        val progress: UpdateDownloadProgress
+    ) : AppUpdateCardState
+
+    /** 用户主动暂停后保留临时文件，继续下载时使用 HTTP Range 从已下载位置恢复。 */
+    data class Paused(
         val update: AppUpdateManifest,
         val progress: UpdateDownloadProgress
     ) : AppUpdateCardState
@@ -276,7 +336,7 @@ sealed interface AppUpdateCardState {
  * 说明：更新页面的一次性事件，安装页和 Toast 必须由 Activity 在当前前台上下文处理。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface AppUpdateUiEvent {
 

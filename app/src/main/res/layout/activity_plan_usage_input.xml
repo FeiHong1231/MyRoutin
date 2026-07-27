@@ -119,25 +119,21 @@
                 android:visibility="gone"
                 tools:visibility="visible">
 
-                <com.google.android.material.progressindicator.CircularProgressIndicator
-                    android:id="@+id/cpiUpdateProgress"
+                <com.hss.myroutin.widget.UpdateCircleProgressView
+                    android:id="@+id/ucpUpdateProgress"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    app:indicatorColor="@color/plan_usage_brand_primary"
-                    app:indicatorSize="36dp"
-                    app:trackColor="@color/plan_usage_progress_track"
-                    app:trackThickness="3dp" />
+                    android:layout_height="match_parent" />
 
-                <TextView
-                    android:id="@+id/tvUpdateProgress"
+                <ImageButton
+                    android:id="@+id/btnToggleUpdateDownload"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:includeFontPadding="false"
-                    android:singleLine="true"
-                    android:textColor="@color/plan_usage_text_primary"
-                    android:textSize="10sp"
-                    tools:text="68%" />
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="暂停下载"
+                    android:padding="14dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_update_float_pause"
+                    app:tint="@color/plan_usage_text_primary" />
             </FrameLayout>
 
             <TextView
@@ -162,9 +158,10 @@
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="关闭更新提示"
-                android:padding="10dp"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:tint="@color/plan_usage_text_tertiary" />
+                android:padding="14dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_update_float_close"
+                app:tint="@color/plan_usage_text_primary" />
         </LinearLayout>
 
         <LinearLayout

@@ -9,6 +9,7 @@
     <color name="white">#FFFFFFFF</color>
     <color name="white_f5f6fa">#F5F6FA</color>
     <color name="blue_2771fa">#2771FA</color>
+    <color name="blue_528fff">#528fff</color>
     <color name="blue_e8f0ff">#E8F0FF</color>
     <color name="orange_fe5d36">#FE5D36</color>
     <color name="orange_ff9f0a">#FF9F0A</color>
@@ -18,6 +19,7 @@
     <color name="gray_727272">#727272</color>
     <color name="gray_999999">#999999</color>
     <color name="gray_eeeeee">#EEEEEE</color>
+    <color name="white_33FFFFFF">#33FFFFFF</color> <!--20%-->
 
     <!-- 订阅查询页采用语义色，夜间模式通过 values-night 覆盖同名资源。 -->
     <color name="plan_usage_page_background">#F5F6FA</color>

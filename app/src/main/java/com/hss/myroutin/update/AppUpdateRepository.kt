@@ -37,6 +37,10 @@ class AppUpdateRepository(
     @Volatile
     private var activeDownloadConnection: HttpURLConnection? = null
 
+    /** 被用户暂停的连接单独标记，下载异常时据此保留未完成的临时 APK。 */
+    @Volatile
+    private var pausedDownloadConnection: HttpURLConnection? = null
+
     /** 当前更新清单连接，供手动检查被取消或重试时立即中断旧请求。 */
     @Volatile
     private var activeCheckConnection: HttpURLConnection? = null
@@ -79,71 +83,127 @@ class AppUpdateRepository(
         }
         val targetFile = File(updateDirectory, "MyRoutin-${update.versionCode}.apk")
         val temporaryFile = File(updateDirectory, "MyRoutin-${update.versionCode}.download")
-        temporaryFile.delete()
+        var connection: HttpURLConnection? = null
+        var downloadedBytes = temporaryFile.takeIf(File::isFile)?.length() ?: 0L
+        var totalBytes = update.apkSizeBytes
         try {
-            val connection = openConnection(update.apkUrl)
-            activeDownloadConnection = connection
-            try {
-                val responseCode = connection.responseCode
-                if (responseCode !in HTTP_SUCCESS_RANGE) {
-                    throw UpdateHttpException()
+            val resumeBytes = downloadedBytes
+            val downloadConnection = openConnection(update.apkUrl, resumeBytes)
+            connection = downloadConnection
+            activeDownloadConnection = downloadConnection
+            val responseCode = downloadConnection.responseCode
+            if (responseCode !in HTTP_SUCCESS_RANGE) {
+                throw UpdateHttpException()
+            }
+            val shouldAppend = resumeBytes > 0L && responseCode == HTTP_PARTIAL_CONTENT
+            if (resumeBytes > 0L && !shouldAppend) {
+                // 服务端未接受 Range 时放弃旧分片，避免把完整响应错误追加到临时 APK。
+                temporaryFile.delete()
+                downloadedBytes = 0L
+            }
+            totalBytes = update.apkSizeBytes
+                ?: downloadConnection.getHeaderField(CONTENT_RANGE_HEADER)
+                    ?.substringAfter(CONTENT_RANGE_SEPARATOR, missingDelimiterValue = "")
+                    ?.toLongOrNull()
+                ?: downloadConnection.contentLengthLong.takeIf { it > 0L }?.let { contentLength ->
+                    if (shouldAppend) downloadedBytes + contentLength else contentLength
                 }
-                val totalBytes = connection.contentLengthLong.takeIf { it > 0L } ?: update.apkSizeBytes
-                val digest = MessageDigest.getInstance(SHA_256_ALGORITHM)
-                var downloadedBytes = 0L
-                var lastReportedBytes = 0L
-                connection.inputStream.use { inputStream ->
-                    FileOutputStream(temporaryFile).buffered().use { outputStream ->
-                        val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                        while (true) {
-                            coroutineContext.ensureActive()
-                            val bytesRead = inputStream.read(buffer)
-                            if (bytesRead < 0) {
-                                break
-                            }
-                            outputStream.write(buffer, 0, bytesRead)
-                            digest.update(buffer, 0, bytesRead)
-                            downloadedBytes += bytesRead
-                            if (downloadedBytes - lastReportedBytes >= PROGRESS_REPORT_INTERVAL_BYTES) {
-                                onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
-                                lastReportedBytes = downloadedBytes
-                            }
+            val digest = MessageDigest.getInstance(SHA_256_ALGORITHM)
+            if (shouldAppend) {
+                temporaryFile.inputStream().buffered().use { cachedInputStream ->
+                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                    while (true) {
+                        val bytesRead = cachedInputStream.read(buffer)
+                        if (bytesRead < 0) {
+                            break
+                        }
+                        digest.update(buffer, 0, bytesRead)
+                    }
+                }
+            }
+            var lastReportedBytes = downloadedBytes
+            downloadConnection.inputStream.use { inputStream ->
+                FileOutputStream(temporaryFile, shouldAppend).buffered().use { outputStream ->
+                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val bytesRead = inputStream.read(buffer)
+                        if (bytesRead < 0) {
+                            break
+                        }
+                        outputStream.write(buffer, 0, bytesRead)
+                        digest.update(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+                        if (downloadedBytes - lastReportedBytes >= PROGRESS_REPORT_INTERVAL_BYTES) {
+                            onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
+                            lastReportedBytes = downloadedBytes
                         }
                     }
                 }
-                coroutineContext.ensureActive()
-                onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
-                if (!digest.digest().toHexString().equals(update.sha256, ignoreCase = true)) {
-                    throw UpdateIntegrityException()
-                }
-                if (targetFile.exists() && !targetFile.delete()) {
-                    throw IOException("无法替换旧更新文件")
-                }
-                if (!temporaryFile.renameTo(targetFile)) {
-                    throw IOException("无法保存更新文件")
-                }
-                AppUpdateDownloadResult.Success(targetFile)
-            } finally {
-                if (activeDownloadConnection === connection) {
-                    activeDownloadConnection = null
-                }
-                connection.disconnect()
             }
+            coroutineContext.ensureActive()
+            onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
+            if (!digest.digest().toHexString().equals(update.sha256, ignoreCase = true)) {
+                throw UpdateIntegrityException()
+            }
+            if (targetFile.exists() && !targetFile.delete()) {
+                throw IOException("无法替换旧更新文件")
+            }
+            if (!temporaryFile.renameTo(targetFile)) {
+                throw IOException("无法保存更新文件")
+            }
+            AppUpdateDownloadResult.Success(targetFile)
         } catch (exception: CancellationException) {
-            temporaryFile.delete()
+            if (!isPauseRequestedFor(connection)) {
+                temporaryFile.delete()
+            }
             throw exception
         } catch (exception: Exception) {
+            if (isPauseRequestedFor(connection)) {
+                return@withContext AppUpdateDownloadResult.Paused(
+                    UpdateDownloadProgress(downloadedBytes, totalBytes)
+                )
+            }
             temporaryFile.delete()
             if (!coroutineContext.isActive) {
                 throw CancellationException()
             }
             AppUpdateDownloadResult.Failure(exception.toDownloadFailureMessage())
+        } finally {
+            connection?.let { currentConnection ->
+                if (activeDownloadConnection === currentConnection) {
+                    activeDownloadConnection = null
+                }
+                if (pausedDownloadConnection === currentConnection) {
+                    pausedDownloadConnection = null
+                }
+                currentConnection.disconnect()
+            }
         }
     }
 
     /** 页面离开时主动断开前台下载连接，确保下载不会在后台继续。 */
     fun cancelForegroundDownload() {
         activeDownloadConnection?.disconnect()
+    }
+
+    /** 暂停仅中断当前网络连接，保留临时 APK 供用户点击继续后通过 Range 请求接续下载。 */
+    fun pauseForegroundDownload() {
+        activeDownloadConnection?.let { connection ->
+            pausedDownloadConnection = connection
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * 关闭暂停卡片或离开下载流程时删除指定版本的部分文件，避免缓存中残留无用安装包。
+     * @param update 当前下载的更新清单，用于定位受限的缓存文件名
+     */
+    fun deletePartialUpdate(update: AppUpdateManifest) {
+        File(
+            File(appContext.cacheDir, UPDATE_CACHE_DIRECTORY),
+            "MyRoutin-${update.versionCode}.download"
+        ).delete()
     }
 
     /** 用户关闭手动检查提示或再次发起检查时，立即中断尚未完成的清单请求。 */
@@ -190,7 +250,7 @@ class AppUpdateRepository(
      * @param url 更新清单或 APK 的 HTTPS 地址
      * @return 已设置超时和 GitHub User-Agent 的连接
      */
-    private fun openConnection(url: String): HttpURLConnection {
+    private fun openConnection(url: String, rangeStartBytes: Long = 0L): HttpURLConnection {
         return (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MILLIS
@@ -198,6 +258,9 @@ class AppUpdateRepository(
             instanceFollowRedirects = true
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "MyRoutin/${BuildConfig.VERSION_NAME}")
+            if (rangeStartBytes > 0L) {
+                setRequestProperty(RANGE_HEADER, "bytes=$rangeStartBytes-")
+            }
         }
     }
 
@@ -235,6 +298,15 @@ class AppUpdateRepository(
         return joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
+    /**
+     * 判断当前异常是否由用户点击暂停造成；只有该分支可保留不完整文件用于断点继续。
+     * @param connection 当前下载使用的网络连接
+     * @return 是否应保留对应的临时 APK
+     */
+    private fun isPauseRequestedFor(connection: HttpURLConnection?): Boolean {
+        return connection != null && pausedDownloadConnection === connection
+    }
+
     /** 下载失败文案只描述用户可行动的结果，不暴露 URL、异常栈或服务端响应。 */
     private fun Throwable.toDownloadFailureMessage(): String {
         return when (this) {
@@ -252,6 +324,9 @@ class AppUpdateRepository(
             "https://github.com/huangssh/MyRoutin/releases/download/"
         private const val UPDATE_CACHE_DIRECTORY = "updates"
         private const val SHA_256_ALGORITHM = "SHA-256"
+        private const val RANGE_HEADER = "Range"
+        private const val CONTENT_RANGE_HEADER = "Content-Range"
+        private const val CONTENT_RANGE_SEPARATOR = "/"
         private const val CONNECT_TIMEOUT_MILLIS = 10_000
         private const val READ_TIMEOUT_MILLIS = 15_000
         private const val DOWNLOAD_BUFFER_SIZE = 8 * 1024
@@ -259,6 +334,7 @@ class AppUpdateRepository(
         private const val INVALID_VERSION_CODE = -1
         private const val INVALID_APK_SIZE = -1L
         private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_PARTIAL_CONTENT = 206
         private val HTTP_SUCCESS_RANGE = 200..299
         private val SHA_256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
     }
@@ -268,7 +344,7 @@ class AppUpdateRepository(
  * 说明：更新清单中经过校验的稳定版本信息，是下载、展示与安装流程共同使用的业务对象。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 data class AppUpdateManifest(
     val versionCode: Int,
@@ -282,7 +358,7 @@ data class AppUpdateManifest(
  * 说明：前台下载的真实字节状态，totalBytes 缺失时页面改为不确定环形进度。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 data class UpdateDownloadProgress(
     val downloadedBytes: Long,
@@ -293,7 +369,7 @@ data class UpdateDownloadProgress(
  * 说明：检查更新结果，避免页面从网络异常或远端版本号推断不可靠状态。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface AppUpdateCheckResult {
 
@@ -311,12 +387,15 @@ sealed interface AppUpdateCheckResult {
  * 说明：APK 下载与校验结果，成功仅在完整文件通过 SHA-256 后返回。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface AppUpdateDownloadResult {
 
     /** 可交给 FileProvider 触发系统安装页的已校验 APK。 */
     data class Success(val apkFile: File) : AppUpdateDownloadResult
+
+    /** 用户主动暂停时保留临时文件与真实进度，供 ViewModel 切换为继续下载入口。 */
+    data class Paused(val progress: UpdateDownloadProgress) : AppUpdateDownloadResult
 
     /** 可直接展示给用户的安全下载失败文案。 */
     data class Failure(val userMessage: String) : AppUpdateDownloadResult

@@ -9,6 +9,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.hss.myroutin.R
 import com.hss.myroutin.databinding.ItemPlanUsageKeyBinding
@@ -30,10 +32,9 @@ import java.util.TimeZone
 class PlanUsageKeyAdapter(
     private val onTogglePlanKey: (String) -> Unit,
     private val onManagePlanKey: (View, SavedPlanKey) -> Unit
-) : RecyclerView.Adapter<PlanUsageKeyAdapter.PlanUsageKeyViewHolder>() {
-
-    /** 适配器内部保留刷新态，避免将一次整体刷新状态写入 SP。 */
-    private var items: List<KeyCardItem> = emptyList()
+) : ListAdapter<PlanUsageKeyAdapter.KeyCardItem, PlanUsageKeyAdapter.PlanUsageKeyViewHolder>(
+    KEY_CARD_ITEM_DIFF_CALLBACK
+) {
 
     /** 卡片金额、百分比和 token 均使用稳定格式，避免列表滚动时产生不同展示精度。 */
     private val usdFormatter = DecimalFormat("0.##")
@@ -55,14 +56,13 @@ class PlanUsageKeyAdapter(
         refreshingKeyIds: Set<String>,
         latestErrorByKeyId: Map<String, String>
     ) {
-        items = keys.map { key ->
+        submitList(keys.map { key ->
             KeyCardItem(
                 key = key,
                 isRefreshing = key.id in refreshingKeyIds,
                 latestError = latestErrorByKeyId[key.id]
             )
-        }
-        notifyDataSetChanged()
+        })
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PlanUsageKeyViewHolder {
@@ -75,13 +75,11 @@ class PlanUsageKeyAdapter(
     }
 
     override fun onBindViewHolder(holder: PlanUsageKeyViewHolder, position: Int) {
-        val item = items[position]
+        val item = getItem(position)
         bindPlanKeyCard(holder.binding, item.key, item.isRefreshing, item.latestError)
     }
 
-    override fun getItemCount(): Int = items.size
-
-    override fun getItemId(position: Int): Long = items[position].key.id.hashCode().toLong()
+    override fun getItemId(position: Int): Long = getItem(position).key.id.hashCode().toLong()
 
     /**
      * 为复用的 XML 卡片写入当前 Key 数据，所有可变区块只切换已有节点的内容和可见性。
@@ -621,8 +619,10 @@ class PlanUsageKeyAdapter(
         }
     }
 
-    /** 单张卡片绑定时需要同时携带持久数据和临时请求状态。 */
-    private data class KeyCardItem(
+    /**
+     * 单张卡片的完整比较对象，包含持久数据和会话内刷新态，确保 DiffUtil 不会漏掉状态变化。
+     */
+    data class KeyCardItem(
         val key: SavedPlanKey,
         val isRefreshing: Boolean,
         val latestError: String?
@@ -634,6 +634,17 @@ class PlanUsageKeyAdapter(
     ) : RecyclerView.ViewHolder(binding.root)
 
     private companion object {
+        /** 以 Key ID 确认同一张卡片，以完整展示状态决定是否需要重新绑定。 */
+        private val KEY_CARD_ITEM_DIFF_CALLBACK = object : DiffUtil.ItemCallback<KeyCardItem>() {
+            override fun areItemsTheSame(oldItem: KeyCardItem, newItem: KeyCardItem): Boolean {
+                return oldItem.key.id == newItem.key.id
+            }
+
+            override fun areContentsTheSame(oldItem: KeyCardItem, newItem: KeyCardItem): Boolean {
+                return oldItem == newItem
+            }
+        }
+
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
         private const val PROGRESS_WEIGHT_TOTAL = 1000f
         private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"

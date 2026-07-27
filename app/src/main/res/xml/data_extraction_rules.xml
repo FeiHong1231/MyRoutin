@@ -1,19 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- 云备份不应包含只能由原设备 Keystore 解密的 Key 缓存。 -->
+        <exclude domain="sharedpref" path="plan_usage_input_cache.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- 设备迁移同样排除 Key，避免迁移后留下无法解密的密文。 -->
+        <exclude domain="sharedpref" path="plan_usage_input_cache.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

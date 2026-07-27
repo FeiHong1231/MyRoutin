@@ -1,13 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
+<?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- 即使未来开启普通数据备份，也禁止备份依赖本机 Keystore 的 API Key 密文。 -->
+    <exclude domain="sharedpref" path="plan_usage_input_cache.xml" />
 </full-backup-content>

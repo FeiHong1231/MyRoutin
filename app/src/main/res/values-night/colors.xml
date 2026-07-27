@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 夜间层级：深蓝灰页面、略亮卡片和低饱和操作底色，避免纯黑与高亮蓝造成眩光。 -->
+    <color name="plan_usage_page_background">#10151D</color>
+    <color name="plan_usage_surface">#19212D</color>
+    <color name="plan_usage_action_surface">#233A61</color>
+    <color name="plan_usage_brand_primary">#8AAEFF</color>
+    <color name="plan_usage_brand_variant">#1F4377</color>
+    <color name="plan_usage_progress_normal_end">#4FD2C4</color>
+    <color name="plan_usage_progress_track">#303C4D</color>
+    <color name="plan_usage_text_primary">#F1F5F9</color>
+    <color name="plan_usage_text_secondary">#B5C0CF</color>
+    <color name="plan_usage_text_tertiary">#8795A9</color>
+    <color name="plan_usage_warning">#FFAC8E</color>
+    <color name="plan_usage_warning_progress_end">#FFC36C</color>
+    <color name="plan_usage_danger">#FF958F</color>
+    <color name="plan_usage_success">#7ADE93</color>
+</resources>

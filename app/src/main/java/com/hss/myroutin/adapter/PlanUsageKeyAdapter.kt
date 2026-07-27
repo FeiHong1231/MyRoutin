@@ -360,7 +360,9 @@ class PlanUsageKeyAdapter(
         val usedRate = calculateUsedRate(displayUsedUsd, limitUsd)
         val isWarning = isCycleQuotaExhausted(limitUsd, remainingUsd) ||
             isProgressOverWarningThreshold(usedRate)
-        val textColor = context.getColor(if (isWarning) R.color.red_ff3b30 else R.color.gray_727272)
+        val textColor = context.getColor(
+            if (isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
+        )
         titleView.text = title
         detailView.text = "已用 ${formatUsd(displayUsedUsd)} / ${formatUsd(limitUsd)}，剩余 ${formatUsd(remainingUsd)}"
         detailView.setTextColor(textColor)
@@ -379,7 +381,7 @@ class PlanUsageKeyAdapter(
         val usedRate = calculateTokenUsedRate(usage.consumedTokens, total)
         val isWarning = isProgressOverWarningThreshold(usedRate)
         val textColor = cardBinding.root.context.getColor(
-            if (isWarning) R.color.red_ff3b30 else R.color.gray_727272
+            if (isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
         )
         cardBinding.tvTokenQuotaDetail.text =
             "已用 ${formatToken(usage.consumedTokens)} / ${formatToken(total)}，剩余 ${formatToken(usage.remainingTokens)}"
@@ -581,8 +583,8 @@ class PlanUsageKeyAdapter(
         val defaultMultiplier = resolveDefaultGroupMultiplier(groupId, groupName) ?: return null
         return when {
             multiplier == null || multiplier == defaultMultiplier -> null
-            multiplier < defaultMultiplier -> R.color.green_34c759
-            else -> R.color.red_ff3b30
+            multiplier < defaultMultiplier -> R.color.plan_usage_success
+            else -> R.color.plan_usage_danger
         }
     }
 

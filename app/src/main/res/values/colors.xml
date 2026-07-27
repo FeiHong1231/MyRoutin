@@ -18,4 +18,20 @@
     <color name="gray_727272">#727272</color>
     <color name="gray_999999">#999999</color>
     <color name="gray_eeeeee">#EEEEEE</color>
+
+    <!-- 订阅查询页采用语义色，夜间模式通过 values-night 覆盖同名资源。 -->
+    <color name="plan_usage_page_background">#F5F6FA</color>
+    <color name="plan_usage_surface">#FFFFFF</color>
+    <color name="plan_usage_action_surface">#E8F0FF</color>
+    <color name="plan_usage_brand_primary">#2771FA</color>
+    <color name="plan_usage_brand_variant">#1D5ECE</color>
+    <color name="plan_usage_progress_normal_end">#03DAC5</color>
+    <color name="plan_usage_progress_track">#EEEEEE</color>
+    <color name="plan_usage_text_primary">#212121</color>
+    <color name="plan_usage_text_secondary">#727272</color>
+    <color name="plan_usage_text_tertiary">#999999</color>
+    <color name="plan_usage_warning">#FE5D36</color>
+    <color name="plan_usage_warning_progress_end">#FF9F0A</color>
+    <color name="plan_usage_danger">#FF3B30</color>
+    <color name="plan_usage_success">#34C759</color>
 </resources>

@@ -3,6 +3,8 @@ package com.hss.myroutin.activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.PopupMenu
@@ -13,7 +15,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
+import com.hss.myroutin.appearance.AppAppearancePreference
+import com.hss.myroutin.appearance.AppearanceMode
 import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
 import com.hss.myroutin.databinding.DialogRenamePlanKeyBinding
 import com.hss.myroutin.model.SavedPlanKey
@@ -53,6 +58,32 @@ class PlanUsageInputActivity : AppCompatActivity() {
         observeViewModel()
     }
 
+    /**
+     * 将外观设置放入系统 ActionBar 的溢出菜单，避免占用查询页的主要操作区域。
+     * @param menu 当前页面的 ActionBar 菜单
+     * @return 是否已成功创建菜单
+     */
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_plan_usage_input, menu)
+        return true
+    }
+
+    /**
+     * 处理页面级 ActionBar 菜单项；卡片内管理操作仍由独立 PopupMenu 负责。
+     * @param item 用户点击的菜单项
+     * @return 当前页面是否已消费该点击事件
+     */
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_appearance -> {
+                showAppearanceDialog()
+                true
+            }
+
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
     /** 初始化固定页面控件和点击入口，避免在运行时拼装根布局与卡片容器。 */
     private fun initializePage() {
         planUsageKeyAdapter = PlanUsageKeyAdapter(
@@ -68,6 +99,22 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.btnRefreshAll.setOnClickListener { refreshAllPlanKeys() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }
         binding.btnQueryAndAdd.setOnClickListener { queryAndAddPlanKey() }
+    }
+
+    /** 展示三种外观模式，单击后立即保存并应用，不增加额外确认步骤。 */
+    private fun showAppearanceDialog() {
+        val appearanceModes = AppearanceMode.values()
+        val selectedIndex = appearanceModes.indexOf(AppAppearancePreference.getSelectedMode(this))
+        AlertDialog.Builder(this)
+            .setTitle("外观")
+            .setSingleChoiceItems(
+                appearanceModes.map { it.displayName }.toTypedArray(),
+                selectedIndex
+            ) { dialog, which ->
+                dialog.dismiss()
+                AppAppearancePreference.saveAndApply(this, appearanceModes[which])
+            }
+            .show()
     }
 
     /** 持续渲染 ViewModel 状态，并单独消费键盘、滚动和 Toast 等一次性事件。 */

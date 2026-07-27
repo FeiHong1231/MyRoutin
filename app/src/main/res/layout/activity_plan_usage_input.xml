@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/white_f5f6fa"
+    android:background="@color/plan_usage_page_background"
     android:orientation="vertical">
 
     <LinearLayout
@@ -28,7 +28,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="我的 Key（0）"
-                android:textColor="@color/gray_212121"
+                android:textColor="@color/plan_usage_text_primary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -37,7 +37,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="end"
-                android:textColor="@color/blue_2771fa"
+                android:textColor="@color/plan_usage_brand_primary"
                 android:textSize="13sp"
                 android:visibility="gone"
                 tools:text="刷新中 1/2"
@@ -83,7 +83,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="添加订阅 Key"
-                android:textColor="@color/gray_212121"
+                android:textColor="@color/plan_usage_text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -140,7 +140,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:textColor="@color/orange_fe5d36"
+            android:textColor="@color/plan_usage_warning"
             android:textSize="13sp"
             android:visibility="gone"
             tools:text="本机加密数据无法读取，请重新添加 Key。"
@@ -153,7 +153,7 @@
             android:layout_marginTop="14dp"
             android:gravity="center"
             android:text="添加 Key 后可集中查看各订阅的额度和到期时间"
-            android:textColor="@color/gray_727272"
+            android:textColor="@color/plan_usage_text_secondary"
             android:textSize="13sp"
             tools:visibility="visible" />
     </LinearLayout>

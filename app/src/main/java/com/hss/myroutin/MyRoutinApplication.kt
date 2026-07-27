@@ -2,18 +2,21 @@ package com.hss.myroutin
 
 import android.app.Application
 import android.content.Context
+import com.hss.myroutin.appearance.AppAppearancePreference
 
 /**
  * 说明：提供应用级 Context，供本地工具页的 Toast 等轻量组件安全复用。
  *
  * @作者 huangssh
- * @版本 1.0
+ * @版本 2.1
  */
 class MyRoutinApplication : Application() {
 
+    /** 在首个页面创建前恢复外观偏好，确保启动时不会先显示错误主题再切换。 */
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        AppAppearancePreference.applySavedMode(this)
     }
 
     companion object {

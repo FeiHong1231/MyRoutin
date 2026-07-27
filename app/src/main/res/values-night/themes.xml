@@ -2,15 +2,26 @@
     <!-- Base application theme. -->
     <style name="Theme.MyRoutin" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
         <!-- Primary brand color. -->
-        <item name="colorPrimary">@color/purple_200</item>
-        <item name="colorPrimaryVariant">@color/purple_700</item>
-        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorPrimary">@color/plan_usage_brand_variant</item>
+        <item name="colorPrimaryVariant">@color/plan_usage_brand_variant</item>
+        <item name="colorOnPrimary">@color/white</item>
         <!-- Secondary brand color. -->
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorSecondaryVariant">@color/teal_200</item>
+        <item name="colorSecondary">@color/plan_usage_brand_primary</item>
+        <item name="colorSecondaryVariant">@color/plan_usage_brand_primary</item>
         <item name="colorOnSecondary">@color/black</item>
-        <!-- Status bar color. -->
+        <!-- 夜间弹窗、菜单、输入框和系统栏沿用同一组深色层级。 -->
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="colorControlNormal">@color/plan_usage_text_tertiary</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
+        <item name="android:textColorHint">@color/plan_usage_text_tertiary</item>
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
-        <!-- Customize your theme here. -->
+        <item name="android:navigationBarColor">?attr/colorPrimaryVariant</item>
+        <item name="android:windowBackground">@color/plan_usage_page_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
     </style>
 </resources>

@@ -18,7 +18,7 @@ import java.io.File
  * 说明：前台更新状态入口，负责检查、下载、取消、校验结果与安装提示，页面只负责渲染。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class AppUpdateViewModel(application: Application) : AndroidViewModel(application) {
 

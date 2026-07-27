@@ -27,7 +27,7 @@ import java.util.TimeZone
  * 说明：订阅 Key 卡片列表适配器，负责将缓存数据格式化并绑定到 XML 卡片；Activity 只处理页面级交互。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class PlanUsageKeyAdapter(
     private val onTogglePlanKey: (String) -> Unit,

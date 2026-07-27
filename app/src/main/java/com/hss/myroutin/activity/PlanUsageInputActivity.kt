@@ -42,7 +42,7 @@ import java.util.Locale
  * 说明：订阅 Key 用量查询页，负责页面状态渲染和页面级交互；卡片格式化与绑定由 Adapter 处理。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 

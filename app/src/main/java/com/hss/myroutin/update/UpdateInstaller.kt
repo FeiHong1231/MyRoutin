@@ -14,7 +14,7 @@ import java.io.File
  * 说明：将已校验 APK 交给 Android 系统安装器，并只在首次需要时引导用户授予安装更新权限。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 object UpdateInstaller {
 

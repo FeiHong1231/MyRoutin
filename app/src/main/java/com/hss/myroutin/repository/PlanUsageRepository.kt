@@ -18,7 +18,7 @@ import java.io.IOException
  * 说明：订阅额度接口的数据入口，负责在 IO 线程完成鉴权请求、响应校验和 JSON 到领域模型的映射。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class PlanUsageRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,

@@ -8,7 +8,7 @@ import com.hss.myroutin.appearance.AppAppearancePreference
  * 说明：提供应用级 Context，供本地工具页的 Toast 等轻量组件安全复用。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class MyRoutinApplication : Application() {
 

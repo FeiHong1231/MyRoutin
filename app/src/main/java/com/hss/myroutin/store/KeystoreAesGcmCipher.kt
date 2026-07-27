@@ -14,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
  * 说明：使用 Android Keystore 持有不可导出的 AES 密钥，为本机敏感存储提供认证加密能力。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class KeystoreAesGcmCipher {
 

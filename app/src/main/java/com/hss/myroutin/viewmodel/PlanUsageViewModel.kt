@@ -22,7 +22,7 @@ import java.util.UUID
  * 说明：订阅额度页的业务状态入口，集中管理 Key、刷新任务、持久化和一次性页面事件。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class PlanUsageViewModel(application: Application) : AndroidViewModel(application) {
 

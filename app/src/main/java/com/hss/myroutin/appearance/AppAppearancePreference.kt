@@ -7,7 +7,7 @@ import androidx.appcompat.app.AppCompatDelegate
  * 说明：管理应用外观偏好，确保手动选择在重启后仍生效，并允许用户恢复跟随系统。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 enum class AppearanceMode(
     val storageValue: String,

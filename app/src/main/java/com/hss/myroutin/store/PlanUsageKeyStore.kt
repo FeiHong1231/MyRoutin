@@ -11,7 +11,7 @@ import org.json.JSONObject
  * 说明：区分正常空数据和无法认证或解析的本机缓存，避免页面把异常情况误展示为“没有 Key”。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 sealed interface PlanUsageKeyLoadResult {
 

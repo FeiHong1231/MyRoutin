@@ -22,7 +22,7 @@ import kotlin.coroutines.coroutineContext
  * 说明：GitHub Release 更新入口，负责读取受信任的更新清单、前台下载 APK 与 SHA-256 完整性校验。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.2
  */
 class AppUpdateRepository(
     context: Context,

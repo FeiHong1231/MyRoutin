@@ -1,12 +1,10 @@
 package com.hss.myroutin.adapter
 
-import android.graphics.drawable.GradientDrawable
+import android.view.LayoutInflater
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
-import com.hss.myroutin.R
+import com.hss.myroutin.databinding.ItemPlanUsageKeyBinding
 import com.hss.myroutin.model.SavedPlanKey
-import com.hss.myroutin.widget.dp
 
 /**
  * 说明：订阅 Key 卡片列表适配器，仅复用卡片容器；具体业务内容由页面按 Key 状态渲染。
@@ -15,7 +13,7 @@ import com.hss.myroutin.widget.dp
  * @版本 1.1
  */
 class PlanUsageKeyAdapter(
-    private val onBindCard: (LinearLayout, SavedPlanKey, Boolean, String?) -> Unit
+    private val onBindCard: (ItemPlanUsageKeyBinding, SavedPlanKey, Boolean, String?) -> Unit
 ) : RecyclerView.Adapter<PlanUsageKeyAdapter.PlanUsageKeyViewHolder>() {
 
     /**
@@ -49,30 +47,17 @@ class PlanUsageKeyAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PlanUsageKeyViewHolder {
-        val card = LinearLayout(parent.context).apply {
-            orientation = LinearLayout.VERTICAL
-            // 卡片纵向更紧凑，左右保留更宽的操作安全边距。
-            setPadding(16.dp, 14.dp, 16.dp, 14.dp)
-            background = GradientDrawable().apply {
-                cornerRadius = 10.dp.toFloat()
-                setColor(context.getColor(R.color.white))
-            }
-            layoutParams = RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                leftMargin = 16.dp
-                rightMargin = 16.dp
-                topMargin = 4.dp
-                bottomMargin = 4.dp
-            }
-        }
-        return PlanUsageKeyViewHolder(card)
+        val binding = ItemPlanUsageKeyBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return PlanUsageKeyViewHolder(binding)
     }
 
     override fun onBindViewHolder(holder: PlanUsageKeyViewHolder, position: Int) {
         val item = items[position]
-        onBindCard(holder.card, item.key, item.isRefreshing, item.latestError)
+        onBindCard(holder.binding, item.key, item.isRefreshing, item.latestError)
     }
 
     override fun getItemCount(): Int = items.size
@@ -88,5 +73,8 @@ class PlanUsageKeyAdapter(
         val latestError: String?
     )
 
-    class PlanUsageKeyViewHolder(val card: LinearLayout) : RecyclerView.ViewHolder(card)
+    /** XML 卡片通过 ViewBinding 持有，避免每次绑定时重新创建整棵 View 树。 */
+    class PlanUsageKeyViewHolder(
+        val binding: ItemPlanUsageKeyBinding
+    ) : RecyclerView.ViewHolder(binding.root)
 }

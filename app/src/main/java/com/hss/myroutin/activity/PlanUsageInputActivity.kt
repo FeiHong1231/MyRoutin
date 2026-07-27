@@ -1,21 +1,13 @@
 package com.hss.myroutin.activity
 
-import android.content.Context
 import android.content.ClipboardManager
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
+import android.content.Context
 import android.os.Bundle
-import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
-import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
@@ -26,16 +18,17 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
+import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
+import com.hss.myroutin.databinding.DialogRenamePlanKeyBinding
+import com.hss.myroutin.databinding.ItemPlanUsageKeyBinding
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.viewmodel.PlanUsageUiEvent
 import com.hss.myroutin.viewmodel.PlanUsageUiState
 import com.hss.myroutin.viewmodel.PlanUsageViewModel
 import com.hss.myroutin.widget.MyToastD
-import com.hss.myroutin.widget.dp
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.text.DecimalFormat
@@ -52,23 +45,9 @@ import java.util.TimeZone
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 
-    /**
-     * 添加 Key 时使用的名称与 Key 输入框，仅在添加面板展开时显示。
-     */
-    private lateinit var etKeyName: EditText
-    private lateinit var etApiKey: EditText
-    private lateinit var llAddKeyPanel: LinearLayout
-    private lateinit var tvKeyCount: TextView
-    private lateinit var tvRefreshStatus: TextView
-    private lateinit var tvEmptyHint: TextView
-    private lateinit var btnAddKey: Button
-    private lateinit var btnRefreshAll: Button
-    /**
-     * 添加面板内从剪贴板填充 Key 的快捷入口。
-     */
-    private lateinit var btnPasteKey: Button
-    private lateinit var btnQueryAndAdd: Button
-    private lateinit var rvPlanKeys: RecyclerView
+    /** 页面固定结构由 XML 描述，Activity 只通过 Binding 更新状态和分发交互。 */
+    private lateinit var binding: ActivityPlanUsageInputBinding
+
     private val usdFormatter = DecimalFormat("0.##")
     private val percentFormatter = DecimalFormat("0.#")
     private val tokenFormatter = DecimalFormat("#,###")
@@ -80,13 +59,32 @@ class PlanUsageInputActivity : AppCompatActivity() {
         ViewModelProvider(this).get(PlanUsageViewModel::class.java)
     }
 
+    /** RecyclerView 仅复用 XML 卡片；每次绑定根据当前 Key 状态显示对应的固定节点。 */
     private lateinit var planUsageKeyAdapter: PlanUsageKeyAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = "订阅 Key 查询"
-        setContentView(createContentView())
+        binding = ActivityPlanUsageInputBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        initializePage()
         observeViewModel()
+    }
+
+    /**
+     * 初始化固定页面控件和点击入口，避免在运行时拼装根布局与卡片容器。
+     */
+    private fun initializePage() {
+        planUsageKeyAdapter = PlanUsageKeyAdapter(::renderPlanKeyCard)
+        binding.rvPlanKeys.apply {
+            layoutManager = LinearLayoutManager(this@PlanUsageInputActivity)
+            adapter = planUsageKeyAdapter
+            isNestedScrollingEnabled = true
+        }
+        binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
+        binding.btnRefreshAll.setOnClickListener { refreshAllPlanKeys() }
+        binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }
+        binding.btnQueryAndAdd.setOnClickListener { queryAndAddPlanKey() }
     }
 
     /**
@@ -115,188 +113,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
             is PlanUsageUiEvent.ScrollToPlanKey -> scrollToPlanKey(event.keyId)
             PlanUsageUiEvent.HideKeyboard -> hideKeyboard()
             PlanUsageUiEvent.ClearAddKeyInputs -> {
-                etKeyName.setText("")
-                etApiKey.setText("")
+                binding.etKeyName.setText("")
+                binding.etApiKey.setText("")
             }
-        }
-    }
-
-    /**
-     * 页面顶部固定管理入口，Key 卡片交给 RecyclerView 滚动，避免多项展开时页面操作区被挤走。
-     */
-    private fun createContentView(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(getColorCompat(R.color.white_f5f6fa))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(16.dp, 16.dp, 16.dp, 8.dp)
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        header.addView(createHeaderTitleRow())
-        header.addView(createHeaderActionRow())
-        llAddKeyPanel = createAddKeyPanel()
-        header.addView(llAddKeyPanel)
-        tvEmptyHint = createText("添加 Key 后可集中查看各订阅的额度和到期时间", 13f, R.color.gray_727272, false).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 14.dp
-            }
-            gravity = Gravity.CENTER
-        }
-        header.addView(tvEmptyHint)
-
-        planUsageKeyAdapter = PlanUsageKeyAdapter(::renderPlanKeyCard)
-        rvPlanKeys = RecyclerView(this).apply {
-            layoutManager = LinearLayoutManager(this@PlanUsageInputActivity)
-            adapter = planUsageKeyAdapter
-            isNestedScrollingEnabled = true
-            clipToPadding = false
-            setPadding(0, 4.dp, 0, 16.dp)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        }
-
-        root.addView(header)
-        root.addView(rvPlanKeys)
-        return root
-    }
-
-    /**
-     * 标题行同时显示当前数量和整体刷新进度，避免刷新状态分散到每一张卡片外。
-     */
-    private fun createHeaderTitleRow(): LinearLayout {
-        return LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
-            tvKeyCount = createText("我的 Key（0）", 20f, R.color.gray_212121, true).apply {
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            tvRefreshStatus = createText("", 13f, R.color.blue_2771fa, false).apply {
-                gravity = Gravity.END
-            }
-            addView(tvKeyCount)
-            addView(tvRefreshStatus)
-        }
-    }
-
-    /**
-     * 添加和整体刷新保持并列，按钮高度、间距与现有工具页操作区统一。
-     */
-    private fun createHeaderActionRow(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 10.dp
-            }
-            btnAddKey = Button(this@PlanUsageInputActivity).apply {
-                text = "添加 Key"
-                isAllCaps = false
-                setOnClickListener { toggleAddKeyPanel() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-                    marginEnd = 6.dp
-                }
-            }
-            btnRefreshAll = Button(this@PlanUsageInputActivity).apply {
-                text = "刷新全部"
-                isAllCaps = false
-                setOnClickListener { refreshAllPlanKeys() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-                    marginStart = 6.dp
-                }
-            }
-            addView(btnAddKey)
-            addView(btnRefreshAll)
-        }
-    }
-
-    /**
-     * 添加面板使用和结果卡片相同的圆角白底，避免输入区与列表卡片割裂。
-     */
-    private fun createAddKeyPanel(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(14.dp, 14.dp, 14.dp, 14.dp)
-            background = createPanelBackgroundDrawable()
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 12.dp
-            }
-            addView(createText("添加订阅 Key", 16f, R.color.gray_212121, true))
-            etKeyName = EditText(this@PlanUsageInputActivity).apply {
-                hint = "名称（可选，例如主力 Key）"
-                isSingleLine = true
-                setPadding(12.dp, 0, 12.dp, 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    44.dp
-                ).apply {
-                    topMargin = 10.dp
-                }
-            }
-            etApiKey = EditText(this@PlanUsageInputActivity).apply {
-                hint = "请输入 plan- 开头的 apikey"
-                isSingleLine = true
-                // API Key 属于长期有效凭证，默认掩码展示以降低旁观泄露风险。
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                setSelectAllOnFocus(true)
-                setPadding(12.dp, 0, 12.dp, 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    44.dp
-                ).apply {
-                    topMargin = 8.dp
-                }
-            }
-            addView(etKeyName)
-            addView(etApiKey)
-            val actionRow = LinearLayout(this@PlanUsageInputActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            }
-            btnPasteKey = Button(this@PlanUsageInputActivity).apply {
-                text = "粘贴"
-                isAllCaps = false
-                setOnClickListener { pasteApiKeyFromClipboard() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 1f).apply {
-                    marginEnd = 6.dp
-                }
-            }
-            btnQueryAndAdd = Button(this@PlanUsageInputActivity).apply {
-                text = "查询并添加"
-                isAllCaps = false
-                setOnClickListener { queryAndAddPlanKey() }
-                layoutParams = LinearLayout.LayoutParams(0, 46.dp, 2f).apply {
-                    marginStart = 6.dp
-                }
-            }
-            actionRow.addView(btnPasteKey)
-            actionRow.addView(btnQueryAndAdd)
-            addView(actionRow)
         }
     }
 
@@ -317,8 +136,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
             MyToastD.show("剪贴板为空")
             return
         }
-        etApiKey.setText(clipText)
-        etApiKey.setSelection(clipText.length)
+        binding.etApiKey.setText(clipText)
+        binding.etApiKey.setSelection(clipText.length)
         MyToastD.show("已粘贴")
     }
 
@@ -327,23 +146,27 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * @param state 当前页面的完整渲染状态
      */
     private fun renderPage(state: PlanUsageUiState) {
-        tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
-        tvRefreshStatus.text = when {
+        binding.tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
+        binding.tvRefreshStatus.text = when {
             state.isRefreshingAll -> "刷新中 ${state.refreshCurrentIndex}/${state.refreshTotalCount}"
             !state.refreshStatusText.isNullOrBlank() -> state.refreshStatusText
             else -> ""
         }
-        tvRefreshStatus.visibility = if (tvRefreshStatus.text.isNullOrBlank()) View.GONE else View.VISIBLE
-        btnAddKey.isEnabled = !state.isRefreshingAll
-        btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
-        btnRefreshAll.isEnabled = state.planKeys.isNotEmpty() && !state.isRefreshingAll
-        btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
-        btnQueryAndAdd.isEnabled = !state.isAddingKey && !state.isRefreshingAll
-        btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
-        btnPasteKey.isEnabled = !state.isAddingKey && !state.isRefreshingAll
-        llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
-        tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
-        rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
+        binding.tvRefreshStatus.visibility = if (binding.tvRefreshStatus.text.isNullOrBlank()) {
+            View.GONE
+        } else {
+            View.VISIBLE
+        }
+        binding.btnAddKey.isEnabled = !state.isRefreshingAll
+        binding.btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
+        binding.btnRefreshAll.isEnabled = state.planKeys.isNotEmpty() && !state.isRefreshingAll
+        binding.btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
+        binding.btnQueryAndAdd.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        binding.btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
+        binding.btnPasteKey.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
+        binding.tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
+        binding.rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
         planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)
     }
 
@@ -358,7 +181,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             return
         }
         if (isVisible) {
-            etApiKey.requestFocus()
+            binding.etApiKey.requestFocus()
         } else {
             hideKeyboard()
         }
@@ -367,8 +190,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
     /** 将当前输入框内容交给 ViewModel 校验、查询并保存。 */
     private fun queryAndAddPlanKey() {
         viewModel.queryAndAddPlanKey(
-            rawName = etKeyName.text?.toString().orEmpty(),
-            rawApiKey = etApiKey.text?.toString().orEmpty()
+            rawName = binding.etKeyName.text?.toString().orEmpty(),
+            rawApiKey = binding.etApiKey.text?.toString().orEmpty()
         )
     }
 
@@ -381,148 +204,127 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private fun scrollToPlanKey(keyId: String) {
         val index = viewModel.uiState.value.planKeys.indexOfFirst { it.id == keyId }
         if (index >= 0) {
-            rvPlanKeys.post { rvPlanKeys.smoothScrollToPosition(index) }
+            binding.rvPlanKeys.post { binding.rvPlanKeys.smoothScrollToPosition(index) }
         }
     }
 
     /**
-     * 卡片容器由 RecyclerView 复用，页面层根据持久状态补齐完整的展示内容和交互入口。
+     * 为复用的 XML 卡片写入当前 Key 数据，所有可变区块只切换已有节点的内容和可见性。
+     * @param cardBinding 当前 ViewHolder 对应的卡片 Binding
+     * @param planKey 当前 Key 的持久化数据和缓存
+     * @param isRefreshing 当前 Key 是否正在请求
+     * @param latestError 当前页面会话内最近一次刷新错误
      */
     private fun renderPlanKeyCard(
-        card: LinearLayout,
+        cardBinding: ItemPlanUsageKeyBinding,
         planKey: SavedPlanKey,
         isRefreshing: Boolean,
         latestError: String?
-    ) {
-        card.removeAllViews()
-        val header = LinearLayout(this).apply {
-            // 操作区顶部对齐标题，避免标题高度变化时按钮纵向漂移。
-            gravity = Gravity.TOP
-            orientation = LinearLayout.HORIZONTAL
-            isClickable = true
-            setOnClickListener {
-                viewModel.togglePlanKeyExpansion(planKey.id)
-            }
+    ) = with(cardBinding) {
+        tvKeyName.text = planKey.name
+        tvMaskedKey.text = maskKey(planKey.apiKey)
+        tvKeyRefreshing.visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
+        tvToggle.text = if (planKey.isExpanded) "收起" else "展开"
+        tvRefreshError.text = latestError?.let { "本次刷新失败：$it，保留上次数据" }.orEmpty()
+        tvRefreshError.visibility = if (latestError == null) View.GONE else View.VISIBLE
+        llKeyDetails.visibility = if (planKey.isExpanded) View.VISIBLE else View.GONE
+        tvCollapsedHint.visibility = if (planKey.isExpanded) View.GONE else View.VISIBLE
+        llKeyHeader.setOnClickListener { viewModel.togglePlanKeyExpansion(planKey.id) }
+        tvToggle.setOnClickListener { viewModel.togglePlanKeyExpansion(planKey.id) }
+        tvManage.setOnClickListener { showPlanKeyMenu(tvManage, planKey) }
+        if (planKey.isExpanded) {
+            renderPlanKeyDetails(cardBinding, planKey)
         }
-        val titleColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val titleRow = LinearLayout(this).apply {
-            gravity = Gravity.BOTTOM
-            orientation = LinearLayout.HORIZONTAL
-        }
-        titleRow.addView(createText(planKey.name, 18f, R.color.gray_212121, true).apply {
-            ellipsize = TextUtils.TruncateAt.END
-            isSingleLine = true
-            // 为右侧操作预留空间，避免窄屏下标题挤压卡片操作入口。
-            maxWidth = 170.dp
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        })
-        titleRow.addView(createText("正在刷新...", 12f, R.color.blue_2771fa, false).apply {
-            isSingleLine = true
-            visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
-            layoutParams = LinearLayout.LayoutParams(64.dp, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                marginStart = 6.dp
-            }
-        })
-        titleColumn.addView(titleRow)
-        titleColumn.addView(createText(maskKey(planKey.apiKey), 12f, R.color.gray_999999, false).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 2.dp
-            }
-        })
-        val toggleView = createText(if (planKey.isExpanded) "收起" else "展开", 13f, R.color.blue_2771fa, false).apply {
-            background = createCardActionBackgroundDrawable()
-            setPadding(10.dp, 0, 10.dp, 0)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                32.dp
-            )
-            setOnClickListener {
-                viewModel.togglePlanKeyExpansion(planKey.id)
-            }
-        }
-        val manageView = createText("管理", 13f, R.color.blue_2771fa, false).apply {
-            background = createCardActionBackgroundDrawable()
-            setPadding(10.dp, 0, 10.dp, 0)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                32.dp
-            ).apply {
-                marginStart = 6.dp
-            }
-            setOnClickListener { showPlanKeyMenu(this, planKey) }
-        }
-        val actionRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
-            addView(toggleView)
-            addView(manageView)
-        }
-        header.addView(titleColumn)
-        header.addView(actionRow)
-        card.addView(header)
-
-        latestError?.let { error ->
-            card.addView(createText("本次刷新失败：$error，保留上次数据", 13f, R.color.orange_fe5d36, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            })
-        }
-        if (!planKey.isExpanded) {
-            card.addView(createText("已收起，点击卡片标题展开详情", 13f, R.color.gray_727272, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            })
-            return
-        }
-        renderPlanKeyDetails(card, planKey)
     }
 
     /**
      * 展开的卡片沿用原有用量、到期时间和倍率样式，缓存不存在时明确引导用户使用整体刷新。
+     * @param cardBinding 展开卡片的固定 XML 节点
+     * @param planKey 当前 Key 及其本地缓存
      */
-    private fun renderPlanKeyDetails(card: LinearLayout, planKey: SavedPlanKey) {
+    private fun renderPlanKeyDetails(cardBinding: ItemPlanUsageKeyBinding, planKey: SavedPlanKey) {
+        resetPlanKeyDetailVisibility(cardBinding)
         val usage = planKey.cachedUsage
         if (usage == null) {
-            val message = if (planKey.lastUpdatedAt == null) {
+            cardBinding.tvEmptyUsageHint.text = if (planKey.lastUpdatedAt == null) {
                 "暂无缓存，点击刷新全部获取最新额度"
             } else {
                 "当前 Key 无可用订阅或额度已耗尽"
             }
-            card.addView(createText(message, 14f, R.color.gray_727272, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            })
-            addCachedTimeRows(card, planKey)
-            addLastUpdatedRow(card, planKey.lastUpdatedAt)
+            cardBinding.tvEmptyUsageHint.visibility = View.VISIBLE
+            cardBinding.llPrimaryDetails.visibility = View.VISIBLE
+            val dayWindowLabel = resolveWindowLabel(
+                planKey.cachedDayWindowStartAt,
+                planKey.cachedDayWindowEndAt,
+                FALLBACK_SHORT_CYCLE_LABEL
+            )
+            val weekWindowLabel = resolveWindowLabel(
+                planKey.cachedWeekWindowStartAt,
+                planKey.cachedWeekWindowEndAt,
+                FALLBACK_WEEK_CYCLE_LABEL
+            )
+            bindDetailRow(
+                cardBinding.llDetailRowFirst,
+                cardBinding.tvDetailLabelFirst,
+                cardBinding.tvDetailValueFirst,
+                "开始时间",
+                formatBeijingTime(planKey.cachedStartAt)
+            )
+            bindDetailRow(
+                cardBinding.llDetailRowSecond,
+                cardBinding.tvDetailLabelSecond,
+                cardBinding.tvDetailValueSecond,
+                "到期时间",
+                formatBeijingTime(planKey.cachedEndAt)
+            )
+            bindDetailRow(
+                cardBinding.llDetailRowThird,
+                cardBinding.tvDetailLabelThird,
+                cardBinding.tvDetailValueThird,
+                "${dayWindowLabel}窗口结束",
+                formatWindowEndAt(planKey.cachedDayWindowEndAt)
+            )
+            bindDetailRow(
+                cardBinding.llDetailRowFourth,
+                cardBinding.tvDetailLabelFourth,
+                cardBinding.tvDetailValueFourth,
+                "${weekWindowLabel}窗口结束",
+                formatWindowEndAt(planKey.cachedWeekWindowEndAt)
+            )
+            bindLastUpdatedRow(cardBinding, planKey.lastUpdatedAt)
             return
         }
-        addRow(card, "套餐", usage.planName ?: "--")
-        addRow(card, "类型/状态", "${usage.type ?: "--"} / ${usage.status ?: "--"}")
-        addRow(card, "开始时间", formatBeijingTime(usage.startAt ?: planKey.cachedStartAt))
-        addRow(card, "到期时间", formatBeijingTime(usage.endAt ?: planKey.cachedEndAt))
+
+        cardBinding.llPrimaryDetails.visibility = View.VISIBLE
+        bindDetailRow(
+            cardBinding.llDetailRowFirst,
+            cardBinding.tvDetailLabelFirst,
+            cardBinding.tvDetailValueFirst,
+            "套餐",
+            usage.planName ?: "--"
+        )
+        bindDetailRow(
+            cardBinding.llDetailRowSecond,
+            cardBinding.tvDetailLabelSecond,
+            cardBinding.tvDetailValueSecond,
+            "类型/状态",
+            "${usage.type ?: "--"} / ${usage.status ?: "--"}"
+        )
+        bindDetailRow(
+            cardBinding.llDetailRowThird,
+            cardBinding.tvDetailLabelThird,
+            cardBinding.tvDetailValueThird,
+            "开始时间",
+            formatBeijingTime(usage.startAt ?: planKey.cachedStartAt)
+        )
+        bindDetailRow(
+            cardBinding.llDetailRowFourth,
+            cardBinding.tvDetailLabelFourth,
+            cardBinding.tvDetailValueFourth,
+            "到期时间",
+            formatBeijingTime(usage.endAt ?: planKey.cachedEndAt)
+        )
+
         if (usage.hasCycleUsage()) {
             val dayWindowLabel = resolveWindowLabel(
                 usage.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
@@ -534,57 +336,214 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
                 FALLBACK_WEEK_CYCLE_LABEL
             )
-            addSectionTitle(card, "周期订阅")
-            addUsageProgress(card, "${dayWindowLabel}额度", usage.dailyUsedUsd, usage.dailyLimitUsd, usage.dailyRemainingUsd)
-            addUsageProgress(card, "${weekWindowLabel}额度", usage.weeklyUsedUsd, usage.weeklyLimitUsd, usage.weeklyRemainingUsd)
-            addRow(card, "${dayWindowLabel}窗口结束", formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt))
-            addRow(card, "${weekWindowLabel}窗口结束", formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt))
+            cardBinding.tvCycleTitle.visibility = View.VISIBLE
+            bindUsageQuota(
+                titleView = cardBinding.tvDayQuotaTitle,
+                detailView = cardBinding.tvDayQuotaDetail,
+                percentView = cardBinding.tvDayQuotaPercent,
+                progressFill = cardBinding.vDayQuotaProgressFill,
+                progressSpacer = cardBinding.vDayQuotaProgressSpacer,
+                title = "${dayWindowLabel}额度",
+                usedUsd = usage.dailyUsedUsd,
+                limitUsd = usage.dailyLimitUsd,
+                remainingUsd = usage.dailyRemainingUsd
+            )
+            cardBinding.llDayQuota.visibility = View.VISIBLE
+            bindUsageQuota(
+                titleView = cardBinding.tvWeekQuotaTitle,
+                detailView = cardBinding.tvWeekQuotaDetail,
+                percentView = cardBinding.tvWeekQuotaPercent,
+                progressFill = cardBinding.vWeekQuotaProgressFill,
+                progressSpacer = cardBinding.vWeekQuotaProgressSpacer,
+                title = "${weekWindowLabel}额度",
+                usedUsd = usage.weeklyUsedUsd,
+                limitUsd = usage.weeklyLimitUsd,
+                remainingUsd = usage.weeklyRemainingUsd
+            )
+            cardBinding.llWeekQuota.visibility = View.VISIBLE
+            bindDetailRow(
+                cardBinding.llCycleWindowEndFirst,
+                cardBinding.tvCycleWindowEndLabelFirst,
+                cardBinding.tvCycleWindowEndValueFirst,
+                "${dayWindowLabel}窗口结束",
+                formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt)
+            )
+            bindDetailRow(
+                cardBinding.llCycleWindowEndSecond,
+                cardBinding.tvCycleWindowEndLabelSecond,
+                cardBinding.tvCycleWindowEndValueSecond,
+                "${weekWindowLabel}窗口结束",
+                formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt)
+            )
         }
         if (usage.hasResourceUsage()) {
-            addSectionTitle(card, "资源包套餐")
-            addTokenProgress(card, usage.totalTokens, usage.consumedTokens, usage.remainingTokens)
+            cardBinding.tvResourceTitle.visibility = View.VISIBLE
+            cardBinding.llTokenQuota.visibility = View.VISIBLE
+            bindTokenQuota(cardBinding, usage)
         }
         if (!usage.hasResourceUsage() && !usage.hasCycleUsage()) {
-            card.addView(createText("暂无可展示额度", 14f, R.color.gray_727272, false).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    topMargin = 10.dp
-                }
-            })
+            cardBinding.tvNoQuotaHint.visibility = View.VISIBLE
         }
-        addRow(card, "允许模型", usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString() ?: "--")
-        addRow(card, "分组倍率", formatGroupMultipliers(usage))
-        addLastUpdatedRow(card, planKey.lastUpdatedAt)
+        bindDetailRow(
+            cardBinding.llAllowedModelsRow,
+            cardBinding.tvAllowedModelsLabel,
+            cardBinding.tvAllowedModelsValue,
+            "允许模型",
+            usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString() ?: "--"
+        )
+        bindDetailRow(
+            cardBinding.llGroupMultipliersRow,
+            cardBinding.tvGroupMultipliersLabel,
+            cardBinding.tvGroupMultipliersValue,
+            "分组倍率",
+            formatGroupMultipliers(usage)
+        )
+        bindLastUpdatedRow(cardBinding, planKey.lastUpdatedAt)
     }
 
     /**
-     * 无订阅或刷新失败时仍展示已缓存的订阅周期和窗口时间，避免关键时间信息随额度耗尽消失。
+     * 每次 RecyclerView 复用卡片前先收起可选区块，避免前一条 Key 的额度内容残留到下一条。
+     * @param cardBinding 当前复用卡片的 Binding
      */
-    private fun addCachedTimeRows(card: LinearLayout, planKey: SavedPlanKey) {
-        val dayWindowLabel = resolveWindowLabel(
-            planKey.cachedDayWindowStartAt,
-            planKey.cachedDayWindowEndAt,
-            FALLBACK_SHORT_CYCLE_LABEL
-        )
-        val weekWindowLabel = resolveWindowLabel(
-            planKey.cachedWeekWindowStartAt,
-            planKey.cachedWeekWindowEndAt,
-            FALLBACK_WEEK_CYCLE_LABEL
-        )
-        addRow(card, "开始时间", formatBeijingTime(planKey.cachedStartAt))
-        addRow(card, "到期时间", formatBeijingTime(planKey.cachedEndAt))
-        addRow(card, "${dayWindowLabel}窗口结束", formatWindowEndAt(planKey.cachedDayWindowEndAt))
-        addRow(card, "${weekWindowLabel}窗口结束", formatWindowEndAt(planKey.cachedWeekWindowEndAt))
+    private fun resetPlanKeyDetailVisibility(cardBinding: ItemPlanUsageKeyBinding) = with(cardBinding) {
+        tvEmptyUsageHint.visibility = View.GONE
+        llPrimaryDetails.visibility = View.GONE
+        tvCycleTitle.visibility = View.GONE
+        llDayQuota.visibility = View.GONE
+        llWeekQuota.visibility = View.GONE
+        llCycleWindowEndFirst.visibility = View.GONE
+        llCycleWindowEndSecond.visibility = View.GONE
+        tvResourceTitle.visibility = View.GONE
+        llTokenQuota.visibility = View.GONE
+        tvNoQuotaHint.visibility = View.GONE
+        llAllowedModelsRow.visibility = View.GONE
+        llGroupMultipliersRow.visibility = View.GONE
+        llLastUpdatedRow.visibility = View.GONE
+    }
+
+    /**
+     * 绑定一行固定的左右信息节点；标签宽度已在 XML 中约束，保证不同卡片扫读位置一致。
+     * @param row 该行的容器
+     * @param labelView 左侧字段名
+     * @param valueView 右侧展示值
+     * @param label 字段名
+     * @param value 字段值
+     */
+    private fun bindDetailRow(
+        row: View,
+        labelView: TextView,
+        valueView: TextView,
+        label: String,
+        value: CharSequence
+    ) {
+        labelView.text = label
+        valueView.text = value
+        row.visibility = View.VISIBLE
     }
 
     /**
      * 每张卡片单独显示最后成功更新时刻，用户可以区分缓存数据和本次刷新结果。
+     * @param cardBinding 当前卡片 Binding
+     * @param lastUpdatedAt 本地缓存最后成功更新时间
      */
-    private fun addLastUpdatedRow(card: LinearLayout, lastUpdatedAt: Long?) {
-        val lastUpdatedText = lastUpdatedAt?.let { formatLocalTime(it) } ?: "未查询"
-        addRow(card, "上次更新", lastUpdatedText)
+    private fun bindLastUpdatedRow(cardBinding: ItemPlanUsageKeyBinding, lastUpdatedAt: Long?) {
+        bindDetailRow(
+            cardBinding.llLastUpdatedRow,
+            cardBinding.tvLastUpdatedLabel,
+            cardBinding.tvLastUpdatedValue,
+            "上次更新",
+            lastUpdatedAt?.let { formatLocalTime(it) } ?: "未查询"
+        )
+    }
+
+    /**
+     * 将周期订阅金额、预警颜色和 XML 进度条权重同步更新，避免动态创建进度 View。
+     * @param titleView 额度标题
+     * @param detailView 已用、总额和剩余额度文本
+     * @param percentView 已用比例文本
+     * @param progressFill 进度条前景节点
+     * @param progressSpacer 进度条剩余空间节点
+     * @param title 当前周期名称
+     * @param usedUsd 服务端已用金额
+     * @param limitUsd 服务端总额度
+     * @param remainingUsd 服务端剩余额度
+     */
+    private fun bindUsageQuota(
+        titleView: TextView,
+        detailView: TextView,
+        percentView: TextView,
+        progressFill: View,
+        progressSpacer: View,
+        title: String,
+        usedUsd: Double?,
+        limitUsd: Double?,
+        remainingUsd: Double?
+    ) {
+        val displayUsedUsd = calculateDisplayUsedUsd(usedUsd, limitUsd, remainingUsd)
+        val usedRate = calculateUsedRate(displayUsedUsd, limitUsd)
+        val isWarning = isCycleQuotaExhausted(limitUsd, remainingUsd) ||
+            isProgressOverWarningThreshold(usedRate)
+        val textColor = getColorCompat(if (isWarning) R.color.red_ff3b30 else R.color.gray_727272)
+        titleView.text = title
+        detailView.text = "已用 ${formatUsd(displayUsedUsd)} / ${formatUsd(limitUsd)}，剩余 ${formatUsd(remainingUsd)}"
+        detailView.setTextColor(textColor)
+        percentView.text = "已用${formatPercent(usedRate)}"
+        percentView.setTextColor(textColor)
+        updateProgressBar(progressFill, progressSpacer, usedRate, isWarning)
+    }
+
+    /**
+     * 将资源包 token 用量写入固定 XML 节点，和周期额度共用相同的预警阈值。
+     * @param cardBinding 当前卡片 Binding
+     * @param usage 当前 Key 返回的用量快照
+     */
+    private fun bindTokenQuota(cardBinding: ItemPlanUsageKeyBinding, usage: PlanUsageSnapshot) {
+        val total = calculateTokenTotal(usage.totalTokens, usage.consumedTokens, usage.remainingTokens)
+        val usedRate = calculateTokenUsedRate(usage.consumedTokens, total)
+        val isWarning = isProgressOverWarningThreshold(usedRate)
+        val textColor = getColorCompat(if (isWarning) R.color.red_ff3b30 else R.color.gray_727272)
+        cardBinding.tvTokenQuotaDetail.text =
+            "已用 ${formatToken(usage.consumedTokens)} / ${formatToken(total)}，剩余 ${formatToken(usage.remainingTokens)}"
+        cardBinding.tvTokenQuotaDetail.setTextColor(textColor)
+        cardBinding.tvTokenQuotaPercent.text = "已用${formatPercent(usedRate)}"
+        cardBinding.tvTokenQuotaPercent.setTextColor(textColor)
+        updateProgressBar(
+            cardBinding.vTokenQuotaProgressFill,
+            cardBinding.vTokenQuotaProgressSpacer,
+            usedRate,
+            isWarning
+        )
+    }
+
+    /**
+     * 通过 XML 中两个固定子节点的权重表示进度，零用量不创建前景节点且仍保留底轨。
+     * @param progressFill 进度条前景节点
+     * @param progressSpacer 进度条剩余空间节点
+     * @param usedRate 当前已用比例
+     * @param isWarning 是否使用预警渐变
+     */
+    private fun updateProgressBar(
+        progressFill: View,
+        progressSpacer: View,
+        usedRate: Double?,
+        isWarning: Boolean
+    ) {
+        val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
+        val progressWeight = if (progressRate <= 0f) {
+            0f
+        } else {
+            (progressRate * PROGRESS_WEIGHT_TOTAL).coerceAtLeast(1f)
+        }
+        val remainingWeight = (PROGRESS_WEIGHT_TOTAL - progressWeight).coerceAtLeast(0f)
+        val fillLayoutParams = progressFill.layoutParams as LinearLayout.LayoutParams
+        fillLayoutParams.weight = progressWeight
+        progressFill.layoutParams = fillLayoutParams
+        val spacerLayoutParams = progressSpacer.layoutParams as LinearLayout.LayoutParams
+        spacerLayoutParams.weight = remainingWeight
+        progressSpacer.layoutParams = spacerLayoutParams
+        progressFill.setBackgroundResource(
+            if (isWarning) R.drawable.bg_plan_usage_progress_warning else R.drawable.bg_plan_usage_progress_normal
+        )
     }
 
     /**
@@ -619,31 +578,17 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * 自定义名称仅用于本地识别，不会影响接口请求中的原始 Key。
      */
     private fun showRenameDialog(planKey: SavedPlanKey) {
-        val input = EditText(this).apply {
-            setText(planKey.name)
-            setSelectAllOnFocus(true)
-            isSingleLine = true
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(12.dp, 8.dp, 12.dp, 8.dp)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                52.dp
-            )
-        }
-        val inputContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24.dp, 2.dp, 24.dp, 6.dp)
-            addView(input)
-        }
+        val dialogBinding = DialogRenamePlanKeyBinding.inflate(layoutInflater)
+        dialogBinding.etPlanKeyName.setText(planKey.name)
         val dialog = AlertDialog.Builder(this)
             .setTitle("重命名 Key")
-            .setView(inputContainer)
+            .setView(dialogBinding.root)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存", null)
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val newName = input.text?.toString()?.trim().orEmpty()
+                val newName = dialogBinding.etPlanKeyName.text?.toString()?.trim().orEmpty()
                 if (newName.isBlank()) {
                     MyToastD.show("名称不能为空")
                     return@setOnClickListener
@@ -673,236 +618,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * 收起输入法，避免新增或整体刷新后输入框已经隐藏但键盘仍停留在页面上。
      */
     private fun hideKeyboard() {
-        etApiKey.clearFocus()
+        binding.etApiKey.clearFocus()
         val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        inputMethodManager?.hideSoftInputFromWindow(etApiKey.windowToken, 0)
-    }
-
-    /**
-     * 添加区域与列表卡片共用白色圆角背景，让页面在多模块时仍保持同一层级。
-     */
-    private fun createPanelBackgroundDrawable(): GradientDrawable {
-        return GradientDrawable().apply {
-            cornerRadius = 10.dp.toFloat()
-            setColor(getColorCompat(R.color.white))
-        }
-    }
-
-    /**
-     * 卡片操作使用浅蓝圆角底色，明确点击边界但不抢占 Key 名称和额度信息的视觉层级。
-     */
-    private fun createCardActionBackgroundDrawable(): GradientDrawable {
-        return GradientDrawable().apply {
-            cornerRadius = 8.dp.toFloat()
-            setColor(getColorCompat(R.color.blue_e8f0ff))
-        }
-    }
-
-    private fun createText(textValue: CharSequence, textSizeSp: Float, colorId: Int, bold: Boolean): TextView {
-        return TextView(this).apply {
-            text = textValue
-            textSize = textSizeSp
-            setTextColor(getColorCompat(colorId))
-            includeFontPadding = true
-            if (bold) {
-                typeface = Typeface.DEFAULT_BOLD
-            }
-        }
-    }
-
-    /**
-     * 添加左右结构信息行，左侧字段名固定宽度便于快速扫读。
-     */
-    private fun addRow(parent: LinearLayout, label: String, value: CharSequence) {
-        val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 6.dp
-            }
-        }
-        row.addView(createText(label, 13f, R.color.gray_727272, false).apply {
-            layoutParams = LinearLayout.LayoutParams(92.dp, ViewGroup.LayoutParams.WRAP_CONTENT)
-        })
-        row.addView(createText(value, 13f, R.color.gray_212121, false).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        parent.addView(row)
-    }
-
-    /**
-     * 周期订阅和资源包套餐分区显示，避免美元额度和 token 额度混在一起。
-     */
-    private fun addSectionTitle(parent: LinearLayout, title: String) {
-        parent.addView(createText(title, 15f, R.color.blue_2771fa, true).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 12.dp
-            }
-        })
-    }
-
-    /**
-     * 添加周期订阅进度条，额度耗尽时使用红色展示。
-     */
-    private fun addUsageProgress(
-        parent: LinearLayout,
-        title: String,
-        usedUsd: Double?,
-        limitUsd: Double?,
-        remainingUsd: Double?
-    ) {
-        val displayUsedUsd = calculateDisplayUsedUsd(usedUsd, limitUsd, remainingUsd)
-        val usedRate = calculateUsedRate(displayUsedUsd, limitUsd)
-        val isExhausted = isCycleQuotaExhausted(limitUsd, remainingUsd)
-        val isWarning = isExhausted || isProgressOverWarningThreshold(usedRate)
-        val wrapper = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 10.dp
-            }
-        }
-        wrapper.addView(createText(title, 13f, R.color.gray_212121, true))
-        addProgressSummaryRow(
-            wrapper,
-            "已用 ${formatUsd(displayUsedUsd)} / ${formatUsd(limitUsd)}，剩余 ${formatUsd(remainingUsd)}",
-            "已用${formatPercent(usedRate)}",
-            if (isWarning) R.color.red_ff3b30 else R.color.gray_727272
-        )
-        wrapper.addView(createUsageProgressBar(usedRate, isWarning))
-        parent.addView(wrapper)
-    }
-
-    /**
-     * 添加资源包 token 进度条，只有资源包 token 有值时才会展示。
-     */
-    private fun addTokenProgress(parent: LinearLayout, totalTokens: Long?, consumedTokens: Long?, remainingTokens: Long?) {
-        val total = calculateTokenTotal(totalTokens, consumedTokens, remainingTokens)
-        val usedRate = calculateTokenUsedRate(consumedTokens, total)
-        val isWarning = isProgressOverWarningThreshold(usedRate)
-        val wrapper = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 8.dp
-            }
-        }
-        addProgressSummaryRow(
-            wrapper,
-            "已用 ${formatToken(consumedTokens)} / ${formatToken(total)}，剩余 ${formatToken(remainingTokens)}",
-            "已用${formatPercent(usedRate)}",
-            if (isWarning) R.color.red_ff3b30 else R.color.gray_727272
-        )
-        wrapper.addView(createUsageProgressBar(usedRate, isWarning))
-        parent.addView(wrapper)
-    }
-
-    /**
-     * 百分比固定靠右展示，避免跟随左侧长文案漂移。
-     */
-    private fun addProgressSummaryRow(parent: LinearLayout, detailText: String, percentText: String, colorId: Int) {
-        val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 2.dp
-            }
-        }
-        row.addView(createText(detailText, 12f, colorId, false).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        row.addView(createText(percentText, 12f, colorId, false).apply {
-            gravity = Gravity.END
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                marginStart = 8.dp
-            }
-        })
-        parent.addView(row)
-    }
-
-    /**
-     * 创建圆角渐变进度条；用权重模拟进度，保证小额消耗也能保留可见宽度。
-     * @param usedRate 当前已用比例
-     * @param isWarning 是否超过预警线或已耗尽
-     */
-    private fun createUsageProgressBar(usedRate: Double?, isWarning: Boolean): View {
-        val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        val progressWeight = if (progressRate <= 0f) {
-            0f
-        } else {
-            (progressRate * PROGRESS_WEIGHT_TOTAL).coerceAtLeast(1f)
-        }
-        val remainingWeight = (PROGRESS_WEIGHT_TOTAL - progressWeight).coerceAtLeast(0f)
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            background = createProgressBackgroundDrawable()
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                8.dp
-            ).apply {
-                topMargin = 6.dp
-            }
-            if (progressWeight > 0f) {
-                addView(View(this@PlanUsageInputActivity).apply {
-                    background = createProgressFillDrawable(isWarning)
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        progressWeight
-                    )
-                })
-            }
-            if (remainingWeight > 0f) {
-                addView(View(this@PlanUsageInputActivity).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        remainingWeight
-                    )
-                })
-            }
-        }
-    }
-
-    /**
-     * 进度条背景统一使用浅灰圆角，承托前景渐变色。
-     */
-    private fun createProgressBackgroundDrawable(): GradientDrawable {
-        return GradientDrawable().apply {
-            cornerRadius = 4.dp.toFloat()
-            setColor(getColorCompat(R.color.gray_eeeeee))
-        }
-    }
-
-    /**
-     * 前景填充根据预警状态切换渐变色：正常蓝青，超过 80% 或耗尽时亮红到亮橙。
-     * @param isWarning 是否使用预警渐变
-     */
-    private fun createProgressFillDrawable(isWarning: Boolean): GradientDrawable {
-        val startColor = if (isWarning) R.color.red_ff3b30 else R.color.blue_2771fa
-        val endColor = if (isWarning) R.color.orange_ff9f0a else R.color.teal_200
-        return GradientDrawable(
-            GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(getColorCompat(startColor), getColorCompat(endColor))
-        ).apply {
-            cornerRadius = 4.dp.toFloat()
-        }
+        inputMethodManager?.hideSoftInputFromWindow(binding.etApiKey.windowToken, 0)
     }
 
     /**

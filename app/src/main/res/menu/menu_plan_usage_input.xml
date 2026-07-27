@@ -3,6 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_check_update"
+        android:orderInCategory="90"
+        android:title="检查更新"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_appearance"
         android:orderInCategory="100"
         android:title="外观"

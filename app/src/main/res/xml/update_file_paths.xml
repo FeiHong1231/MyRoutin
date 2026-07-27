@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 仅向系统安装器临时共享经过 SHA-256 校验的更新缓存，不暴露整个缓存目录。 -->
+    <cache-path
+        name="update_apks"
+        path="updates/" />
+</paths>

@@ -59,9 +59,18 @@ jobs:
         run: |
           set -euo pipefail
           version_name="${TAG_NAME#v}"
+          configured_version_name="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]+"([^"]+)".*/\1/p' app/build.gradle | head -n 1)"
+          version_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
           apk_path="app/build/outputs/apk/release/MyRoutin-${version_name}.apk"
           test "$TAG_NAME" != "$version_name"
+          test "$version_name" = "$configured_version_name"
+          test -n "$version_code"
           test -f "$apk_path"
-          gh release create "$TAG_NAME" "$apk_path" \
+          sha256="$(sha256sum "$apk_path" | awk '{print $1}')"
+          apk_size_bytes="$(wc -c < "$apk_path" | tr -d '[:space:]')"
+          apk_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/MyRoutin-${version_name}.apk"
+          printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "apkUrl": "%s",\n  "sha256": "%s",\n  "apkSizeBytes": %s\n}\n' \
+            "$version_code" "$version_name" "$apk_url" "$sha256" "$apk_size_bytes" > update.json
+          gh release create "$TAG_NAME" "$apk_path" "update.json#update.json" \
             --title "MyRoutin ${version_name}" \
             --generate-notes

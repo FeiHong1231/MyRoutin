@@ -22,11 +22,21 @@ import com.hss.myroutin.appearance.AppearanceMode
 import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
 import com.hss.myroutin.databinding.DialogRenamePlanKeyBinding
 import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.update.AppUpdateCardState
+import com.hss.myroutin.update.AppUpdateManifest
+import com.hss.myroutin.update.AppUpdateUiEvent
+import com.hss.myroutin.update.AppUpdateUiState
+import com.hss.myroutin.update.AppUpdateViewModel
+import com.hss.myroutin.update.UpdateDownloadProgress
+import com.hss.myroutin.update.UpdateInstallResult
+import com.hss.myroutin.update.UpdateInstaller
 import com.hss.myroutin.viewmodel.PlanUsageUiEvent
 import com.hss.myroutin.viewmodel.PlanUsageUiState
 import com.hss.myroutin.viewmodel.PlanUsageViewModel
 import com.hss.myroutin.widget.MyToastD
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.Locale
 
 /**
  * 说明：订阅 Key 用量查询页，负责页面状态渲染和页面级交互；卡片格式化与绑定由 Adapter 处理。
@@ -44,6 +54,11 @@ class PlanUsageInputActivity : AppCompatActivity() {
      */
     private val viewModel by lazy {
         ViewModelProvider(this).get(PlanUsageViewModel::class.java)
+    }
+
+    /** 前台更新状态独立于 Key 查询状态，旋转页面后仍可继续渲染同一次下载。 */
+    private val appUpdateViewModel by lazy {
+        ViewModelProvider(this).get(AppUpdateViewModel::class.java)
     }
 
     /** Adapter 自行绑定卡片内容，Activity 只接收展开与管理等页面级回调。 */
@@ -75,6 +90,11 @@ class PlanUsageInputActivity : AppCompatActivity() {
      */
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.action_check_update -> {
+                appUpdateViewModel.checkForUpdate(isManual = true)
+                true
+            }
+
             R.id.action_appearance -> {
                 showAppearanceDialog()
                 true
@@ -99,6 +119,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.btnRefreshAll.setOnClickListener { refreshAllPlanKeys() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }
         binding.btnQueryAndAdd.setOnClickListener { queryAndAddPlanKey() }
+        binding.btnUpdateAction.setOnClickListener { handleUpdateAction() }
+        binding.btnDismissUpdate.setOnClickListener { appUpdateViewModel.dismissUpdateCard() }
     }
 
     /** 展示三种外观模式，单击后立即保存并应用，不增加额外确认步骤。 */
@@ -127,6 +149,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 launch {
                     viewModel.events.collect(::handleUiEvent)
                 }
+                launch {
+                    appUpdateViewModel.uiState.collect(::renderUpdateCard)
+                }
+                launch {
+                    appUpdateViewModel.events.collect(::handleUpdateUiEvent)
+                }
             }
         }
     }
@@ -144,6 +172,17 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 binding.etKeyName.setText("")
                 binding.etApiKey.setText("")
             }
+        }
+    }
+
+    /**
+     * 消费更新相关的一次性页面事件，下载后的安装确认必须由当前前台 Activity 发起。
+     * @param event 更新 ViewModel 发出的单次 UI 事件
+     */
+    private fun handleUpdateUiEvent(event: AppUpdateUiEvent) {
+        when (event) {
+            is AppUpdateUiEvent.ShowToast -> MyToastD.show(event.message)
+            is AppUpdateUiEvent.ShowInstallPrompt -> showInstallPrompt(event.update, event.apkFile)
         }
     }
 
@@ -200,6 +239,179 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
         binding.rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
         planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)
+    }
+
+    /**
+     * 依据更新状态显示或隐藏首页下载卡片；环形进度只在应用停留前台时出现。
+     * @param state 当前更新检查、下载或安装入口状态
+     */
+    private fun renderUpdateCard(state: AppUpdateUiState) {
+        if (state.isChecking && state.isManualChecking && state.cardState is AppUpdateCardState.Hidden) {
+            showUpdateCheckingCard()
+            return
+        }
+        when (val cardState = state.cardState) {
+            AppUpdateCardState.Hidden -> {
+                binding.llUpdateCard.visibility = View.GONE
+            }
+
+            is AppUpdateCardState.Available -> {
+                showUpdateActionCard(
+                    title = "发现新版本 ${formatUpdateVersion(cardState.update.versionName)}",
+                    detail = "已准备好下载",
+                    actionText = "下载更新"
+                )
+            }
+
+            is AppUpdateCardState.Downloading -> {
+                val progress = cardState.progress
+                binding.llUpdateCard.visibility = View.VISIBLE
+                binding.tvUpdateTitle.text =
+                    "新版本 ${formatUpdateVersion(cardState.update.versionName)} 正在下载"
+                binding.tvUpdateDetail.text = formatDownloadProgress(progress)
+                binding.flUpdateProgress.visibility = View.VISIBLE
+                binding.btnUpdateAction.visibility = View.GONE
+                binding.btnDismissUpdate.contentDescription = "取消下载"
+                val totalBytes = progress.totalBytes
+                binding.cpiUpdateProgress.isIndeterminate = totalBytes == null
+                if (totalBytes != null) {
+                    val percent = ((progress.downloadedBytes * UPDATE_PROGRESS_MAX) / totalBytes)
+                        .toInt()
+                        .coerceIn(0, UPDATE_PROGRESS_MAX)
+                    binding.cpiUpdateProgress.setProgressCompat(percent, false)
+                    binding.tvUpdateProgress.text = "${percent}%"
+                } else {
+                    binding.tvUpdateProgress.text = "…"
+                }
+            }
+
+            is AppUpdateCardState.DownloadFailed -> {
+                showUpdateActionCard(
+                    title = "下载失败",
+                    detail = cardState.userMessage,
+                    actionText = "重试"
+                )
+            }
+
+            is AppUpdateCardState.Downloaded -> {
+                showUpdateActionCard(
+                    title = "新版本 ${formatUpdateVersion(cardState.update.versionName)} 已下载",
+                    detail = "安装包已完成校验",
+                    actionText = "立即安装"
+                )
+            }
+        }
+    }
+
+    /** 手动检查时明确展示当前请求状态，避免用户只看到“正在处理”却不知道请求是否仍在进行。 */
+    private fun showUpdateCheckingCard() {
+        binding.llUpdateCard.visibility = View.VISIBLE
+        binding.tvUpdateTitle.text = "正在检查更新"
+        binding.tvUpdateDetail.text = "正在连接 GitHub Release"
+        binding.flUpdateProgress.visibility = View.VISIBLE
+        binding.cpiUpdateProgress.isIndeterminate = true
+        binding.tvUpdateProgress.text = "…"
+        binding.btnUpdateAction.visibility = View.GONE
+        binding.btnDismissUpdate.contentDescription = "取消检查更新"
+    }
+
+    /**
+     * 渲染可点击操作的更新卡片，下载完成、待下载和失败重试共用同一套视觉结构。
+     * @param title 卡片主标题
+     * @param detail 卡片辅助说明
+     * @param actionText 右侧操作按钮文案
+     */
+    private fun showUpdateActionCard(title: String, detail: String, actionText: String) {
+        binding.llUpdateCard.visibility = View.VISIBLE
+        binding.tvUpdateTitle.text = title
+        binding.tvUpdateDetail.text = detail
+        binding.flUpdateProgress.visibility = View.GONE
+        binding.btnUpdateAction.visibility = View.VISIBLE
+        binding.btnUpdateAction.text = actionText
+        binding.btnDismissUpdate.contentDescription = "关闭更新提示"
+    }
+
+    /** 根据当前更新卡片状态开始下载、重试下载，或打开系统安装页。 */
+    private fun handleUpdateAction() {
+        when (val cardState = appUpdateViewModel.uiState.value.cardState) {
+            is AppUpdateCardState.Available,
+            is AppUpdateCardState.DownloadFailed -> appUpdateViewModel.downloadUpdate()
+
+            is AppUpdateCardState.Downloaded -> requestInstall(cardState.apkFile)
+            else -> Unit
+        }
+    }
+
+    /**
+     * APK 下载并校验完成后给予一次明确确认，避免直接跳转系统安装器打断用户当前操作。
+     * @param update 已下载并校验通过的更新信息
+     * @param apkFile 可安全共享给系统安装器的缓存 APK
+     */
+    private fun showInstallPrompt(update: AppUpdateManifest, apkFile: File) {
+        if (isFinishing || isDestroyed) {
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("新版本 ${formatUpdateVersion(update.versionName)} 已下载")
+            .setMessage("安装包已完成校验，是否立即安装？")
+            .setNegativeButton("稍后", null)
+            .setPositiveButton("立即安装") { _, _ -> requestInstall(apkFile) }
+            .show()
+    }
+
+    /**
+     * 仅向 Android 系统安装器交付已校验文件；首次安装前先征得用户对未知来源安装的授权。
+     * @param apkFile 已完成 SHA-256 校验的更新安装包
+     */
+    private fun requestInstall(apkFile: File) {
+        when (val result = UpdateInstaller.requestInstall(this, apkFile)) {
+            UpdateInstallResult.Started -> Unit
+            UpdateInstallResult.PermissionRequired -> showInstallPermissionDialog()
+            is UpdateInstallResult.Failure -> MyToastD.show(result.userMessage)
+        }
+    }
+
+    /** 用户只有在点击安装时才看到授权说明，避免在普通更新检查过程中打扰用户。 */
+    private fun showInstallPermissionDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("需要安装授权")
+            .setMessage("首次安装更新，需要允许 MyRoutin 安装未知来源应用。授权后请返回此处再次点击“立即安装”。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("去授权") { _, _ ->
+                if (!UpdateInstaller.openInstallPermissionSettings(this)) {
+                    MyToastD.show("无法打开安装授权设置")
+                }
+            }
+            .show()
+    }
+
+    /**
+     * 将字节数以可读单位展示，不足 1 MB 时保留 KB，方便用户判断下载是否正常推进。
+     * @param bytes 已下载或总计的字节数
+     * @return 适合下载卡片展示的文件大小
+     */
+    private fun formatDataSize(bytes: Long): String {
+        return if (bytes < BYTES_PER_MEGABYTE) {
+            "${bytes / BYTES_PER_KILOBYTE} KB"
+        } else {
+            String.format(Locale.getDefault(), "%.1f MB", bytes / BYTES_PER_MEGABYTE.toDouble())
+        }
+    }
+
+    /**
+     * 组合实时下载量和远端文件大小；服务端未返回大小时仍展示已下载字节数。
+     * @param progress 当前下载进度
+     * @return 下载卡片的辅助文案
+     */
+    private fun formatDownloadProgress(progress: UpdateDownloadProgress): String {
+        return progress.totalBytes?.let { totalBytes ->
+            "${formatDataSize(progress.downloadedBytes)} / ${formatDataSize(totalBytes)}"
+        } ?: "${formatDataSize(progress.downloadedBytes)} 已下载"
+    }
+
+    /** 统一为远端版本号补充 v 前缀，避免发布清单误填 v2.2 时展示成 vv2.2。 */
+    private fun formatUpdateVersion(versionName: String): String {
+        return if (versionName.startsWith("v", ignoreCase = true)) versionName else "v${versionName}"
     }
 
     /**
@@ -306,6 +518,16 @@ class PlanUsageInputActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * 下载仅允许在首页前台进行；旋转屏幕由同一 ViewModel 接管，不能误取消正在下载的任务。
+     */
+    override fun onStop() {
+        if (!isChangingConfigurations) {
+            appUpdateViewModel.stopForegroundDownload()
+        }
+        super.onStop()
+    }
+
     /** 收起输入法，避免新增或整体刷新后输入框已经隐藏但键盘仍停留在页面上。 */
     private fun hideKeyboard() {
         binding.etApiKey.clearFocus()
@@ -320,5 +542,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
         private const val MENU_DELETE = 4
         private const val MOVE_OFFSET_UP = -1
         private const val MOVE_OFFSET_DOWN = 1
+        private const val UPDATE_PROGRESS_MAX = 100
+        private const val BYTES_PER_KILOBYTE = 1024L
+        private const val BYTES_PER_MEGABYTE = BYTES_PER_KILOBYTE * BYTES_PER_KILOBYTE
     }
 }

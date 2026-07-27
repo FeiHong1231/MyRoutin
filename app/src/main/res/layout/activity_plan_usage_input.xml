@@ -70,6 +70,104 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/llUpdateCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_plan_usage_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="10dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvUpdateTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    tools:text="新版本 v2.2 正在下载" />
+
+                <TextView
+                    android:id="@+id/tvUpdateDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:textColor="@color/plan_usage_text_secondary"
+                    android:textSize="12sp"
+                    tools:text="8.4 MB / 12.4 MB" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/flUpdateProgress"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/cpiUpdateProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:indicatorColor="@color/plan_usage_brand_primary"
+                    app:indicatorSize="36dp"
+                    app:trackColor="@color/plan_usage_progress_track"
+                    app:trackThickness="3dp" />
+
+                <TextView
+                    android:id="@+id/tvUpdateProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:singleLine="true"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="10sp"
+                    tools:text="68%" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/btnUpdateAction"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_plan_usage_card_action"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:singleLine="true"
+                android:textColor="@color/plan_usage_brand_primary"
+                android:textSize="13sp"
+                android:visibility="gone"
+                tools:text="立即安装"
+                tools:visibility="visible" />
+
+            <ImageButton
+                android:id="@+id/btnDismissUpdate"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="关闭更新提示"
+                android:padding="10dp"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:tint="@color/plan_usage_text_tertiary" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/llAddKeyPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

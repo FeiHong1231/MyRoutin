@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
 import com.hss.myroutin.model.PlanUsageSnapshot
@@ -242,7 +243,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
             etApiKey = EditText(this@PlanUsageInputActivity).apply {
                 hint = "请输入 plan- 开头的 apikey"
                 isSingleLine = true
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                // API Key 属于长期有效凭证，默认掩码展示以降低旁观泄露风险。
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 setSelectAllOnFocus(true)
                 setPadding(12.dp, 0, 12.dp, 0)
                 layoutParams = LinearLayout.LayoutParams(
@@ -430,7 +432,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         val refreshTraceId = "refresh-${System.currentTimeMillis()}"
         // HTTP 成功和空订阅都计入成功，只有网络或服务端异常才进入失败统计。
         var successCount = 0
-        Log.i(PLAN_USAGE_LOG_TAG, "[$refreshTraceId] 开始刷新全部，共 ${refreshQueue.size} 个 Key")
+        logDebug { "[$refreshTraceId] 开始刷新全部，共 ${refreshQueue.size} 个 Key" }
         renderPage()
         lifecycleScope.launch {
             refreshQueue.forEachIndexed { index, planKey ->
@@ -448,10 +450,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
             }
             isRefreshingAll = false
             refreshStatusText = "已刷新 ${refreshTotalCount} 项"
-            Log.i(
-                PLAN_USAGE_LOG_TAG,
+            logDebug {
                 "[$refreshTraceId] 刷新全部完成，成功 $successCount 项，失败 ${refreshTotalCount - successCount} 项"
-            )
+            }
             renderPage()
         }
     }
@@ -835,7 +836,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 查询在 IO 线程执行，并输出完整但脱敏的请求与响应日志，保证添加与整体刷新展示一致。
+     * 查询在 IO 线程执行；详细请求日志仅保留在 Debug 构建，正式包不记录用户 Key 与接口数据。
      * @param apiKey 用户输入的订阅 Key，仅以脱敏形式写入日志
      * @param requestTrace 当前请求的来源和批次标识
      */
@@ -843,25 +844,20 @@ class PlanUsageInputActivity : AppCompatActivity() {
         return withContext(Dispatchers.IO) {
             // 从发起请求到解析结束统一计时，便于判断网络等待还是解析环节耗时。
             val requestStartedAt = System.currentTimeMillis()
-            Log.i(
-                PLAN_USAGE_LOG_TAG,
+            logDebug {
                 "$requestTrace 请求：GET $USAGE_ENDPOINT，Authorization=Bearer ${maskKey(apiKey)}，Accept=application/json"
-            )
+            }
             try {
                 val usage = requestUsage(apiKey, requestTrace)
-                Log.i(
-                    PLAN_USAGE_LOG_TAG,
+                logDebug {
                     "$requestTrace 请求完成，耗时 ${System.currentTimeMillis() - requestStartedAt}ms，" +
                         "解析结果=${if (usage == null) "空订阅" else "成功"}"
-                )
+                }
                 PlanUsageQueryResult(usage, null)
             } catch (throwable: Throwable) {
-                // 保留完整证书与网络异常链，便于通过 Logcat 定位客户端 TLS 失败原因。
-                Log.e(
-                    PLAN_USAGE_LOG_TAG,
-                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms",
-                    throwable
-                )
+                logDebug(throwable) {
+                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
+                }
                 PlanUsageQueryResult(null, throwable.message ?: "查询失败")
             }
         }
@@ -877,7 +873,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 发起真实接口请求，并记录响应状态、响应头和完整响应体；接口通过 Authorization Bearer 识别订阅主体。
+     * 发起真实接口请求；接口通过 Authorization Bearer 识别订阅主体，响应详情仅在 Debug 构建记录。
      * @param apiKey 用户输入并保存到本地的订阅 key
      * @param requestTrace 当前请求的来源和批次标识
      */
@@ -896,12 +892,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
             } else {
                 connection.errorStream
             })?.bufferedReader()?.use { it.readText() }.orEmpty()
-            logResponse(requestTrace, responseCode, connection.headerFields, responseText)
+            logDebugResponse(requestTrace, responseCode, connection.headerFields, responseText)
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
                 throw IllegalStateException("鉴权失败 invalid_api_key")
             }
             if (responseCode !in 200..299) {
-                throw IllegalStateException("HTTP $responseCode ${responseText.take(120)}")
+                throw IllegalStateException("HTTP $responseCode")
             }
             val body = responseText.trim()
             if (body.isEmpty() || body == "null") {
@@ -914,36 +910,60 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 输出接口响应的全部可读取内容；响应体按安全长度拆分，避免 Logcat 截断导致排查信息缺失。
+     * 仅在 Debug 构建输出响应详情，避免正式包的 Logcat 包含用户套餐信息或服务端诊断数据。
      * @param requestTrace 当前请求的来源和批次标识
      * @param responseCode HTTP 响应状态码
      * @param responseHeaders 服务端响应头
      * @param responseBody 服务端原始响应体
      */
-    private fun logResponse(
+    private fun logDebugResponse(
         requestTrace: String,
         responseCode: Int,
         responseHeaders: Map<String?, List<String>?>,
         responseBody: String
     ) {
-        Log.i(PLAN_USAGE_LOG_TAG, "$requestTrace 响应状态：HTTP $responseCode")
-        logLongMessage("$requestTrace 响应头", responseHeaders.toString())
-        logLongMessage("$requestTrace 响应体", responseBody)
+        if (!BuildConfig.DEBUG) {
+            return
+        }
+        Log.d(PLAN_USAGE_LOG_TAG, "$requestTrace 响应状态：HTTP $responseCode")
+        logDebugLongMessage("$requestTrace 响应头", responseHeaders.toString())
+        logDebugLongMessage("$requestTrace 响应体", responseBody)
     }
 
     /**
-     * 将较长的接口日志拆成多条输出，保留每段序号以便按 Logcat 时间顺序拼接完整内容。
+     * 将 Debug 环境的较长接口日志拆成多条输出，保留每段序号以便按 Logcat 时间顺序拼接完整内容。
      * @param label 日志内容的业务标签
      * @param content 需要完整输出的原始内容
      */
-    private fun logLongMessage(label: String, content: String) {
+    private fun logDebugLongMessage(label: String, content: String) {
         if (content.isEmpty()) {
-            Log.i(PLAN_USAGE_LOG_TAG, "$label：<空>")
+            Log.d(PLAN_USAGE_LOG_TAG, "$label：<空>")
             return
         }
         val chunks = content.chunked(MAX_LOG_CHUNK_SIZE)
         chunks.forEachIndexed { index, chunk ->
-            Log.i(PLAN_USAGE_LOG_TAG, "$label（${index + 1}/${chunks.size}）：$chunk")
+            Log.d(PLAN_USAGE_LOG_TAG, "$label（${index + 1}/${chunks.size}）：$chunk")
+        }
+    }
+
+    /**
+     * Debug 日志使用惰性消息构造，保证 Release 连请求标识和脱敏 Key 都不会进入 Logcat。
+     * @param message Debug 构建时才计算的日志内容
+     */
+    private inline fun logDebug(message: () -> String) {
+        if (BuildConfig.DEBUG) {
+            Log.d(PLAN_USAGE_LOG_TAG, message())
+        }
+    }
+
+    /**
+     * Debug 异常日志用于本地调试；Release 构建直接跳过，避免输出证书和网络诊断细节。
+     * @param throwable 当前请求抛出的异常
+     * @param message Debug 构建时才计算的日志内容
+     */
+    private inline fun logDebug(throwable: Throwable, message: () -> String) {
+        if (BuildConfig.DEBUG) {
+            Log.e(PLAN_USAGE_LOG_TAG, message(), throwable)
         }
     }
 

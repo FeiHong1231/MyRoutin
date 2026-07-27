@@ -10,7 +10,6 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
-import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -22,30 +21,28 @@ import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
-import com.hss.myroutin.store.PlanUsageKeyStore
+import com.hss.myroutin.viewmodel.PlanUsageUiEvent
+import com.hss.myroutin.viewmodel.PlanUsageUiState
+import com.hss.myroutin.viewmodel.PlanUsageViewModel
 import com.hss.myroutin.widget.MyToastD
 import com.hss.myroutin.widget.dp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.DateFormat
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.UUID
 
 /**
  * 说明：订阅 Key 用量查询页，支持本地保存多个 Key 并集中查看额度。
@@ -77,35 +74,51 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private val tokenFormatter = DecimalFormat("#,###")
 
     /**
-     * 本地存储负责迁移旧单 Key 数据，并保存多 Key 的卡片状态和查询缓存。
+     * 页面只从 ViewModel 获取状态，避免 Activity 同时承担请求、缓存和列表状态职责。
      */
-    private val planUsageKeyStore by lazy { PlanUsageKeyStore(this) }
+    private val viewModel by lazy {
+        ViewModelProvider(this).get(PlanUsageViewModel::class.java)
+    }
 
-    /**
-     * 内存中的全部 Key 是页面唯一数据源；展示时再按置顶状态和创建时间排序。
-     */
-    private val savedPlanKeys = mutableListOf<SavedPlanKey>()
-
-    /**
-     * 请求进度和错误提示只服务于当前页面会话，避免短暂的刷新状态在下次启动时误导用户。
-     */
-    private val refreshingKeyIds = mutableSetOf<String>()
-    private val latestErrorByKeyId = mutableMapOf<String, String>()
     private lateinit var planUsageKeyAdapter: PlanUsageKeyAdapter
-    private var isAddKeyPanelVisible = false
-    private var isAddingKey = false
-    private var isRefreshingAll = false
-    private var refreshCurrentIndex = 0
-    private var refreshTotalCount = 0
-    private var refreshStatusText: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = "订阅 Key 查询"
-        savedPlanKeys.addAll(planUsageKeyStore.loadKeys())
-        isAddKeyPanelVisible = savedPlanKeys.isEmpty()
         setContentView(createContentView())
-        renderPage()
+        observeViewModel()
+    }
+
+    /**
+     * 持续渲染 ViewModel 状态，并单独消费键盘、滚动和 Toast 等一次性事件。
+     */
+    private fun observeViewModel() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.uiState.collect(::renderPage)
+                }
+                launch {
+                    viewModel.events.collect(::handleUiEvent)
+                }
+            }
+        }
+    }
+
+    /**
+     * Activity 仅处理必须依赖 View 的短暂副作用，业务状态已由 ViewModel 完成更新。
+     * @param event ViewModel 发出的单次 UI 事件
+     */
+    private fun handleUiEvent(event: PlanUsageUiEvent) {
+        when (event) {
+            is PlanUsageUiEvent.ShowToast -> MyToastD.show(event.message)
+            is PlanUsageUiEvent.ScrollToPlanKey -> scrollToPlanKey(event.keyId)
+            PlanUsageUiEvent.HideKeyboard -> hideKeyboard()
+            PlanUsageUiEvent.ClearAddKeyInputs -> {
+                etKeyName.setText("")
+                etApiKey.setText("")
+            }
+        }
     }
 
     /**
@@ -310,239 +323,63 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
-     * 刷新页面上的数量、添加状态和列表缓存；列表状态始终从同一份 Key 数据派生。
+     * 依据 ViewModel 输出的唯一状态刷新数量、控件状态和列表内容。
+     * @param state 当前页面的完整渲染状态
      */
-    private fun renderPage() {
-        tvKeyCount.text = "我的 Key（${savedPlanKeys.size}）"
+    private fun renderPage(state: PlanUsageUiState) {
+        tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
         tvRefreshStatus.text = when {
-            isRefreshingAll -> "刷新中 ${refreshCurrentIndex}/${refreshTotalCount}"
-            !refreshStatusText.isNullOrBlank() -> refreshStatusText
+            state.isRefreshingAll -> "刷新中 ${state.refreshCurrentIndex}/${state.refreshTotalCount}"
+            !state.refreshStatusText.isNullOrBlank() -> state.refreshStatusText
             else -> ""
         }
         tvRefreshStatus.visibility = if (tvRefreshStatus.text.isNullOrBlank()) View.GONE else View.VISIBLE
-        btnAddKey.isEnabled = !isRefreshingAll
-        btnAddKey.text = if (isAddKeyPanelVisible) "收起" else "添加 Key"
-        btnRefreshAll.isEnabled = savedPlanKeys.isNotEmpty() && !isRefreshingAll
-        btnRefreshAll.text = if (isRefreshingAll) "刷新中..." else "刷新全部"
-        btnQueryAndAdd.isEnabled = !isAddingKey && !isRefreshingAll
-        btnQueryAndAdd.text = if (isAddingKey) "查询中..." else "查询并添加"
-        btnPasteKey.isEnabled = !isAddingKey && !isRefreshingAll
-        llAddKeyPanel.visibility = if (isAddKeyPanelVisible) View.VISIBLE else View.GONE
-        tvEmptyHint.visibility = if (savedPlanKeys.isEmpty()) View.VISIBLE else View.GONE
-        rvPlanKeys.visibility = if (savedPlanKeys.isEmpty()) View.GONE else View.VISIBLE
-        planUsageKeyAdapter.submit(sortedPlanKeys(), refreshingKeyIds)
+        btnAddKey.isEnabled = !state.isRefreshingAll
+        btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
+        btnRefreshAll.isEnabled = state.planKeys.isNotEmpty() && !state.isRefreshingAll
+        btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
+        btnQueryAndAdd.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
+        btnPasteKey.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
+        tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
+        rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
+        planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)
     }
 
     /**
-     * 添加入口可展开或收起，收起时保留用户已输入内容，避免误点后丢失尚未验证的新 Key。
+     * 添加入口的可见性由 ViewModel 更新，Activity 只保留输入框聚焦和收起键盘的 View 操作。
      */
     private fun toggleAddKeyPanel() {
-        if (isRefreshingAll) {
+        val wasVisible = viewModel.uiState.value.isAddKeyPanelVisible
+        viewModel.toggleAddKeyPanel()
+        val isVisible = viewModel.uiState.value.isAddKeyPanelVisible
+        if (wasVisible == isVisible) {
             return
         }
-        isAddKeyPanelVisible = !isAddKeyPanelVisible
-        if (!isAddKeyPanelVisible) {
-            hideKeyboard()
-        }
-        renderPage()
-        if (isAddKeyPanelVisible) {
+        if (isVisible) {
             etApiKey.requestFocus()
-        }
-    }
-
-    /**
-     * 仅在接口可正常返回时新增 Key，失败时保留用户输入，便于修正后再次查询。
-     */
-    private fun queryAndAddPlanKey() {
-        if (isAddingKey || isRefreshingAll) {
-            return
-        }
-        val apiKey = etApiKey.text?.toString()?.trim().orEmpty()
-        if (apiKey.isBlank()) {
-            MyToastD.show("请输入 apikey")
-            return
-        }
-        val duplicatedKey = savedPlanKeys.firstOrNull { it.apiKey == apiKey }
-        if (duplicatedKey != null) {
-            MyToastD.show("该 Key 已添加")
-            isAddKeyPanelVisible = false
+        } else {
             hideKeyboard()
-            renderPage()
-            scrollToPlanKey(duplicatedKey.id)
-            return
-        }
-        isAddingKey = true
-        renderPage()
-        hideKeyboard()
-        lifecycleScope.launch {
-            val result = queryPlanUsage(apiKey, "[添加 Key]")
-            isAddingKey = false
-            if (result.error != null) {
-                renderPage()
-                MyToastD.show("订阅查询失败：${result.error}")
-                return@launch
-            }
-            val now = System.currentTimeMillis()
-            val name = etKeyName.text?.toString()?.trim().orEmpty().ifBlank {
-                "Key ${savedPlanKeys.size + 1}"
-            }
-            savedPlanKeys.add(
-                SavedPlanKey(
-                    id = UUID.randomUUID().toString(),
-                    name = name,
-                    apiKey = apiKey,
-                    createdAt = now,
-                    sortOrder = nextPlanKeySortOrder(),
-                    lastUpdatedAt = now,
-                    cachedStartAt = result.usage?.startAt,
-                    cachedEndAt = result.usage?.endAt,
-                    cachedDayWindowStartAt = result.usage?.dayWindowStartAt,
-                    cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
-                    cachedWeekWindowStartAt = result.usage?.weekWindowStartAt,
-                    cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
-                    cachedUsage = result.usage
-                )
-            )
-            planUsageKeyStore.saveKeys(savedPlanKeys)
-            etKeyName.setText("")
-            etApiKey.setText("")
-            isAddKeyPanelVisible = false
-            refreshStatusText = null
-            renderPage()
-            scrollToPlanKey(savedPlanKeys.last().id)
-            MyToastD.show("已添加 $name")
         }
     }
 
-    /**
-     * 全部刷新按当前展示顺序串行发起，避免多个 Key 同时请求导致接口压力或状态错位。
-     */
-    private fun refreshAllPlanKeys() {
-        if (savedPlanKeys.isEmpty() || isRefreshingAll) {
-            return
-        }
-        hideKeyboard()
-        isAddKeyPanelVisible = false
-        isRefreshingAll = true
-        refreshStatusText = null
-        val refreshQueue = sortedPlanKeys()
-        refreshTotalCount = refreshQueue.size
-        refreshCurrentIndex = 0
-        // 同一批次共用追踪标识，方便在 Logcat 中还原一次“刷新全部”的完整请求链路。
-        val refreshTraceId = "refresh-${System.currentTimeMillis()}"
-        // HTTP 成功和空订阅都计入成功，只有网络或服务端异常才进入失败统计。
-        var successCount = 0
-        logDebug { "[$refreshTraceId] 开始刷新全部，共 ${refreshQueue.size} 个 Key" }
-        renderPage()
-        lifecycleScope.launch {
-            refreshQueue.forEachIndexed { index, planKey ->
-                refreshCurrentIndex = index + 1
-                refreshingKeyIds.add(planKey.id)
-                renderPage()
-                val requestTrace = "[$refreshTraceId] ${index + 1}/${refreshQueue.size} ${planKey.name}"
-                val result = queryPlanUsage(planKey.apiKey, requestTrace)
-                refreshingKeyIds.remove(planKey.id)
-                applyRefreshResult(planKey.id, result)
-                if (result.error == null) {
-                    successCount += 1
-                }
-                renderPage()
-            }
-            isRefreshingAll = false
-            refreshStatusText = "已刷新 ${refreshTotalCount} 项"
-            logDebug {
-                "[$refreshTraceId] 刷新全部完成，成功 $successCount 项，失败 ${refreshTotalCount - successCount} 项"
-            }
-            renderPage()
-        }
-    }
-
-    /**
-     * 成功刷新才覆盖卡片缓存；请求失败只记录当次提示，旧额度仍然可以继续查看。
-     * @param keyId 本次请求对应的 Key ID
-     * @param result 接口查询结果
-     */
-    private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult) {
-        if (result.error != null) {
-            latestErrorByKeyId[keyId] = result.error
-            return
-        }
-        latestErrorByKeyId.remove(keyId)
-        updatePlanKey(keyId) { planKey ->
-            planKey.copy(
-                lastUpdatedAt = System.currentTimeMillis(),
-                cachedStartAt = result.usage?.startAt ?: planKey.cachedStartAt,
-                cachedEndAt = result.usage?.endAt ?: planKey.cachedEndAt,
-                cachedDayWindowStartAt = result.usage?.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
-                cachedDayWindowEndAt = result.usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
-                cachedWeekWindowStartAt = result.usage?.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
-                cachedWeekWindowEndAt = result.usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
-                cachedUsage = result.usage
-            )
-        }
-    }
-
-    /**
-     * 卡片按用户保存的顺序号展示，排序号相同时再按添加时间兜底，避免异常数据导致顺序不稳定。
-     */
-    private fun sortedPlanKeys(): List<SavedPlanKey> {
-        return savedPlanKeys.sortedWith(
-            compareBy<SavedPlanKey> { it.sortOrder }
-                .thenBy { it.createdAt }
+    /** 将当前输入框内容交给 ViewModel 校验、查询并保存。 */
+    private fun queryAndAddPlanKey() {
+        viewModel.queryAndAddPlanKey(
+            rawName = etKeyName.text?.toString().orEmpty(),
+            rawApiKey = etApiKey.text?.toString().orEmpty()
         )
     }
 
-    /**
-     * 新添加的 Key 始终使用当前最大排序号，保证其显示在列表末尾。
-     */
-    private fun nextPlanKeySortOrder(): Int {
-        return (savedPlanKeys.maxOfOrNull { it.sortOrder } ?: -1) + 1
+    /** 批量刷新策略由 ViewModel 管理，Activity 仅分发按钮点击。 */
+    private fun refreshAllPlanKeys() {
+        viewModel.refreshAllPlanKeys()
     }
 
-    /**
-     * 更新一项后立即写入 SP，保证展开、排序、命名和刷新缓存关闭 App 后仍能恢复。
-     * @param keyId 需要更新的 Key ID
-     * @param transform 基于旧条目生成新条目的变换
-     */
-    private fun updatePlanKey(keyId: String, transform: (SavedPlanKey) -> SavedPlanKey) {
-        val index = savedPlanKeys.indexOfFirst { it.id == keyId }
-        if (index < 0) {
-            return
-        }
-        savedPlanKeys[index] = transform(savedPlanKeys[index])
-        planUsageKeyStore.saveKeys(savedPlanKeys)
-    }
-
-    /**
-     * 与目标相邻卡片交换排序号，实现一次只移动一位且保留其他卡片顺序。
-     * @param keyId 需要移动的 Key ID
-     * @param moveOffset 上移为 -1，下移为 1
-     */
-    private fun movePlanKeyByOne(keyId: String, moveOffset: Int) {
-        val orderedKeys = sortedPlanKeys()
-        val currentPosition = orderedKeys.indexOfFirst { it.id == keyId }
-        val targetPosition = currentPosition + moveOffset
-        if (currentPosition < 0 || targetPosition !in orderedKeys.indices) {
-            return
-        }
-        val currentKey = orderedKeys[currentPosition]
-        val targetKey = orderedKeys[targetPosition]
-        val currentIndex = savedPlanKeys.indexOfFirst { it.id == currentKey.id }
-        val targetIndex = savedPlanKeys.indexOfFirst { it.id == targetKey.id }
-        if (currentIndex < 0 || targetIndex < 0) {
-            return
-        }
-        savedPlanKeys[currentIndex] = currentKey.copy(sortOrder = targetKey.sortOrder)
-        savedPlanKeys[targetIndex] = targetKey.copy(sortOrder = currentKey.sortOrder)
-        planUsageKeyStore.saveKeys(savedPlanKeys)
-        renderPage()
-    }
-
-    /**
-     * 将重复 Key 或刚添加的新 Key 定位到当前排序后的卡片位置，减少用户再次查找的成本。
-     */
+    /** 将指定 Key 定位到 ViewModel 已排序的当前列表位置。 */
     private fun scrollToPlanKey(keyId: String) {
-        val index = sortedPlanKeys().indexOfFirst { it.id == keyId }
+        val index = viewModel.uiState.value.planKeys.indexOfFirst { it.id == keyId }
         if (index >= 0) {
             rvPlanKeys.post { rvPlanKeys.smoothScrollToPosition(index) }
         }
@@ -551,7 +388,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
     /**
      * 卡片容器由 RecyclerView 复用，页面层根据持久状态补齐完整的展示内容和交互入口。
      */
-    private fun renderPlanKeyCard(card: LinearLayout, planKey: SavedPlanKey, isRefreshing: Boolean) {
+    private fun renderPlanKeyCard(
+        card: LinearLayout,
+        planKey: SavedPlanKey,
+        isRefreshing: Boolean,
+        latestError: String?
+    ) {
         card.removeAllViews()
         val header = LinearLayout(this).apply {
             // 操作区顶部对齐标题，避免标题高度变化时按钮纵向漂移。
@@ -559,8 +401,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             isClickable = true
             setOnClickListener {
-                updatePlanKey(planKey.id) { it.copy(isExpanded = !it.isExpanded) }
-                renderPage()
+                viewModel.togglePlanKeyExpansion(planKey.id)
             }
         }
         val titleColumn = LinearLayout(this).apply {
@@ -606,8 +447,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 32.dp
             )
             setOnClickListener {
-                updatePlanKey(planKey.id) { it.copy(isExpanded = !it.isExpanded) }
-                renderPage()
+                viewModel.togglePlanKeyExpansion(planKey.id)
             }
         }
         val manageView = createText("管理", 13f, R.color.blue_2771fa, false).apply {
@@ -632,7 +472,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         header.addView(actionRow)
         card.addView(header)
 
-        latestErrorByKeyId[planKey.id]?.let { error ->
+        latestError?.let { error ->
             card.addView(createText("本次刷新失败：$error，保留上次数据", 13f, R.color.orange_fe5d36, false).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -751,20 +591,21 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * 管理菜单提供单步排序、命名和删除，刻意不加入单卡刷新以保持用户确认的整体刷新规则。
      */
     private fun showPlanKeyMenu(anchor: View, planKey: SavedPlanKey) {
-        if (isRefreshingAll) {
+        val state = viewModel.uiState.value
+        if (state.isRefreshingAll) {
             MyToastD.show("正在刷新全部 Key")
             return
         }
-        val currentPosition = sortedPlanKeys().indexOfFirst { it.id == planKey.id }
+        val currentPosition = state.planKeys.indexOfFirst { it.id == planKey.id }
         PopupMenu(this, anchor).apply {
             menu.add(0, MENU_MOVE_UP, 0, "上移一位").isEnabled = currentPosition > 0
-            menu.add(0, MENU_MOVE_DOWN, 1, "下移一位").isEnabled = currentPosition in 0 until savedPlanKeys.lastIndex
+            menu.add(0, MENU_MOVE_DOWN, 1, "下移一位").isEnabled = currentPosition in 0 until state.planKeys.lastIndex
             menu.add(0, MENU_RENAME, 2, "重命名")
             menu.add(0, MENU_DELETE, 3, "删除")
             setOnMenuItemClickListener { menuItem ->
                 when (menuItem.itemId) {
-                    MENU_MOVE_UP -> movePlanKeyByOne(planKey.id, MOVE_OFFSET_UP)
-                    MENU_MOVE_DOWN -> movePlanKeyByOne(planKey.id, MOVE_OFFSET_DOWN)
+                    MENU_MOVE_UP -> viewModel.movePlanKeyByOne(planKey.id, MOVE_OFFSET_UP)
+                    MENU_MOVE_DOWN -> viewModel.movePlanKeyByOne(planKey.id, MOVE_OFFSET_DOWN)
                     MENU_RENAME -> showRenameDialog(planKey)
                     MENU_DELETE -> showDeleteDialog(planKey)
                 }
@@ -807,8 +648,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
                     MyToastD.show("名称不能为空")
                     return@setOnClickListener
                 }
-                updatePlanKey(planKey.id) { it.copy(name = newName) }
-                renderPage()
+                viewModel.renamePlanKey(planKey.id, newName)
                 dialog.dismiss()
             }
         }
@@ -824,43 +664,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
             .setMessage("删除后将移除此 Key 的本地缓存，是否继续？")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
-                savedPlanKeys.removeAll { it.id == planKey.id }
-                latestErrorByKeyId.remove(planKey.id)
-                planUsageKeyStore.saveKeys(savedPlanKeys)
-                if (savedPlanKeys.isEmpty()) {
-                    isAddKeyPanelVisible = true
-                }
-                renderPage()
+                viewModel.deletePlanKey(planKey.id)
             }
             .show()
-    }
-
-    /**
-     * 查询在 IO 线程执行；详细请求日志仅保留在 Debug 构建，正式包不记录用户 Key 与接口数据。
-     * @param apiKey 用户输入的订阅 Key，仅以脱敏形式写入日志
-     * @param requestTrace 当前请求的来源和批次标识
-     */
-    private suspend fun queryPlanUsage(apiKey: String, requestTrace: String): PlanUsageQueryResult {
-        return withContext(Dispatchers.IO) {
-            // 从发起请求到解析结束统一计时，便于判断网络等待还是解析环节耗时。
-            val requestStartedAt = System.currentTimeMillis()
-            logDebug {
-                "$requestTrace 请求：GET $USAGE_ENDPOINT，Authorization=Bearer ${maskKey(apiKey)}，Accept=application/json"
-            }
-            try {
-                val usage = requestUsage(apiKey, requestTrace)
-                logDebug {
-                    "$requestTrace 请求完成，耗时 ${System.currentTimeMillis() - requestStartedAt}ms，" +
-                        "解析结果=${if (usage == null) "空订阅" else "成功"}"
-                }
-                PlanUsageQueryResult(usage, null)
-            } catch (throwable: Throwable) {
-                logDebug(throwable) {
-                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
-                }
-                PlanUsageQueryResult(null, throwable.message ?: "查询失败")
-            }
-        }
     }
 
     /**
@@ -870,142 +676,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
         etApiKey.clearFocus()
         val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         inputMethodManager?.hideSoftInputFromWindow(etApiKey.windowToken, 0)
-    }
-
-    /**
-     * 发起真实接口请求；接口通过 Authorization Bearer 识别订阅主体，响应详情仅在 Debug 构建记录。
-     * @param apiKey 用户输入并保存到本地的订阅 key
-     * @param requestTrace 当前请求的来源和批次标识
-     */
-    private fun requestUsage(apiKey: String, requestTrace: String): PlanUsageSnapshot? {
-        val connection = (URL(USAGE_ENDPOINT).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10000
-            readTimeout = 10000
-            setRequestProperty("Authorization", "Bearer $apiKey")
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            val responseCode = connection.responseCode
-            val responseText = (if (responseCode in 200..299) {
-                connection.inputStream
-            } else {
-                connection.errorStream
-            })?.bufferedReader()?.use { it.readText() }.orEmpty()
-            logDebugResponse(requestTrace, responseCode, connection.headerFields, responseText)
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-                throw IllegalStateException("鉴权失败 invalid_api_key")
-            }
-            if (responseCode !in 200..299) {
-                throw IllegalStateException("HTTP $responseCode")
-            }
-            val body = responseText.trim()
-            if (body.isEmpty() || body == "null") {
-                return null
-            }
-            return parseUsage(JSONObject(body))
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    /**
-     * 仅在 Debug 构建输出响应详情，避免正式包的 Logcat 包含用户套餐信息或服务端诊断数据。
-     * @param requestTrace 当前请求的来源和批次标识
-     * @param responseCode HTTP 响应状态码
-     * @param responseHeaders 服务端响应头
-     * @param responseBody 服务端原始响应体
-     */
-    private fun logDebugResponse(
-        requestTrace: String,
-        responseCode: Int,
-        responseHeaders: Map<String?, List<String>?>,
-        responseBody: String
-    ) {
-        if (!BuildConfig.DEBUG) {
-            return
-        }
-        Log.d(PLAN_USAGE_LOG_TAG, "$requestTrace 响应状态：HTTP $responseCode")
-        logDebugLongMessage("$requestTrace 响应头", responseHeaders.toString())
-        logDebugLongMessage("$requestTrace 响应体", responseBody)
-    }
-
-    /**
-     * 将 Debug 环境的较长接口日志拆成多条输出，保留每段序号以便按 Logcat 时间顺序拼接完整内容。
-     * @param label 日志内容的业务标签
-     * @param content 需要完整输出的原始内容
-     */
-    private fun logDebugLongMessage(label: String, content: String) {
-        if (content.isEmpty()) {
-            Log.d(PLAN_USAGE_LOG_TAG, "$label：<空>")
-            return
-        }
-        val chunks = content.chunked(MAX_LOG_CHUNK_SIZE)
-        chunks.forEachIndexed { index, chunk ->
-            Log.d(PLAN_USAGE_LOG_TAG, "$label（${index + 1}/${chunks.size}）：$chunk")
-        }
-    }
-
-    /**
-     * Debug 日志使用惰性消息构造，保证 Release 连请求标识和脱敏 Key 都不会进入 Logcat。
-     * @param message Debug 构建时才计算的日志内容
-     */
-    private inline fun logDebug(message: () -> String) {
-        if (BuildConfig.DEBUG) {
-            Log.d(PLAN_USAGE_LOG_TAG, message())
-        }
-    }
-
-    /**
-     * Debug 异常日志用于本地调试；Release 构建直接跳过，避免输出证书和网络诊断细节。
-     * @param throwable 当前请求抛出的异常
-     * @param message Debug 构建时才计算的日志内容
-     */
-    private inline fun logDebug(throwable: Throwable, message: () -> String) {
-        if (BuildConfig.DEBUG) {
-            Log.e(PLAN_USAGE_LOG_TAG, message(), throwable)
-        }
-    }
-
-    /**
-     * 将接口 JSON 解析成本页展示所需字段，接口额外字段不会影响当前页面。
-     * @param jsonObject 接口返回的订阅用量 JSON
-     */
-    private fun parseUsage(jsonObject: JSONObject): PlanUsageSnapshot {
-        val allowedModels = jsonObject.optJSONArray("allowedModels")?.let { jsonArray ->
-            (0 until jsonArray.length()).mapNotNull { index ->
-                jsonArray.optString(index).takeIf { it.isNotBlank() }
-            }
-        }.orEmpty()
-        val allowedGroups = jsonObject.optJSONArray("allowedGroups")?.let { jsonArray ->
-            (0 until jsonArray.length()).mapNotNull { index ->
-                jsonArray.optString(index).takeIf { it.isNotBlank() }
-            }
-        }.orEmpty()
-        return PlanUsageSnapshot(
-            planName = jsonObject.stringOrNull("planName"),
-            type = jsonObject.intOrNull("type"),
-            status = jsonObject.intOrNull("status"),
-            startAt = jsonObject.stringOrNull("startAt"),
-            endAt = jsonObject.stringOrNull("endAt"),
-            dailyLimitUsd = jsonObject.doubleOrNull("dailyLimitUsd"),
-            weeklyLimitUsd = jsonObject.doubleOrNull("weeklyLimitUsd"),
-            dailyUsedUsd = jsonObject.doubleOrNull("dailyUsedUsd"),
-            weeklyUsedUsd = jsonObject.doubleOrNull("weeklyUsedUsd"),
-            dailyRemainingUsd = jsonObject.doubleOrNull("dailyRemainingUsd"),
-            weeklyRemainingUsd = jsonObject.doubleOrNull("weeklyRemainingUsd"),
-            dayWindowStartAt = jsonObject.stringOrNull("dayWindowStartAt"),
-            dayWindowEndAt = jsonObject.stringOrNull("dayWindowEndAt"),
-            weekWindowStartAt = jsonObject.stringOrNull("weekWindowStartAt"),
-            weekWindowEndAt = jsonObject.stringOrNull("weekWindowEndAt"),
-            totalTokens = jsonObject.longOrNull("totalTokens"),
-            consumedTokens = jsonObject.longOrNull("consumedTokens"),
-            remainingTokens = jsonObject.longOrNull("remainingTokens"),
-            allowedModels = allowedModels,
-            allowedGroups = allowedGroups,
-            groupNames = jsonObject.stringMapOrEmpty("groupNames"),
-            groupMultipliers = jsonObject.doubleMapOrEmpty("groupMultipliers")
-        )
     }
 
     /**
@@ -1438,74 +1108,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         return resources.getColor(colorId, theme)
     }
 
-    private fun JSONObject.stringOrNull(name: String): String? {
-        return if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotBlank() } else null
-    }
-
-    private fun JSONObject.intOrNull(name: String): Int? {
-        return if (has(name) && !isNull(name)) optInt(name) else null
-    }
-
-    private fun JSONObject.longOrNull(name: String): Long? {
-        return optLong(name, Long.MIN_VALUE).takeIf { it != Long.MIN_VALUE }
-    }
-
-    private fun JSONObject.doubleOrNull(name: String): Double? {
-        return optDouble(name, Double.NaN).takeIf { !it.isNaN() }
-    }
-
-    /**
-     * 将接口返回的 ID 到名称对象转为 Map，避免页面直接依赖 JSONObject。
-     * @param name JSON 对象字段名
-     */
-    private fun JSONObject.stringMapOrEmpty(name: String): Map<String, String> {
-        val mapObject = optJSONObject(name) ?: return emptyMap()
-        val result = linkedMapOf<String, String>()
-        val keys = mapObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            mapObject.stringOrNull(key)?.let { value ->
-                result[key] = value
-            }
-        }
-        return result
-    }
-
-    /**
-     * 将接口返回的 ID 到倍率对象转为 Map，保留分组倍率的原始数值。
-     * @param name JSON 对象字段名
-     */
-    private fun JSONObject.doubleMapOrEmpty(name: String): Map<String, Double> {
-        val mapObject = optJSONObject(name) ?: return emptyMap()
-        val result = linkedMapOf<String, Double>()
-        val keys = mapObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            mapObject.doubleOrNull(key)?.let { value ->
-                result[key] = value
-            }
-        }
-        return result
-    }
-
-    /**
-     * 单 key 查询结果，允许成功空订阅和失败状态共用同一套渲染入口。
-     */
-    data class PlanUsageQueryResult(
-        val usage: PlanUsageSnapshot?,
-        val error: String?
-    )
-
     companion object {
-        /**
-         * 订阅额度请求的 Logcat Tag，不包含 Key 等鉴权信息。
-         */
-        private const val PLAN_USAGE_LOG_TAG = "PlanUsageQuery"
-        /**
-         * 单条 Logcat 日志的内容上限需保留前缀空间，超长 JSON 按此长度分段避免被系统截断。
-         */
-        private const val MAX_LOG_CHUNK_SIZE = 3_000
-        private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
         private const val PROGRESS_WEIGHT_TOTAL = 1000f
         private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"

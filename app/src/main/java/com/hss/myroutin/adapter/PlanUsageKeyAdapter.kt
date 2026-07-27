@@ -15,7 +15,7 @@ import com.hss.myroutin.widget.dp
  * @版本 1.1
  */
 class PlanUsageKeyAdapter(
-    private val onBindCard: (LinearLayout, SavedPlanKey, Boolean) -> Unit
+    private val onBindCard: (LinearLayout, SavedPlanKey, Boolean, String?) -> Unit
 ) : RecyclerView.Adapter<PlanUsageKeyAdapter.PlanUsageKeyViewHolder>() {
 
     /**
@@ -31,10 +31,19 @@ class PlanUsageKeyAdapter(
      * 使用当前排序后的 Key 列表更新卡片，刷新态只在本次页面会话内生效。
      * @param keys 已排序的订阅 Key
      * @param refreshingKeyIds 正在请求的 Key ID 集合
+     * @param latestErrorByKeyId 当前页面会话内的最近刷新错误
      */
-    fun submit(keys: List<SavedPlanKey>, refreshingKeyIds: Set<String>) {
+    fun submit(
+        keys: List<SavedPlanKey>,
+        refreshingKeyIds: Set<String>,
+        latestErrorByKeyId: Map<String, String>
+    ) {
         items = keys.map { key ->
-            KeyCardItem(key, key.id in refreshingKeyIds)
+            KeyCardItem(
+                key = key,
+                isRefreshing = key.id in refreshingKeyIds,
+                latestError = latestErrorByKeyId[key.id]
+            )
         }
         notifyDataSetChanged()
     }
@@ -63,7 +72,7 @@ class PlanUsageKeyAdapter(
 
     override fun onBindViewHolder(holder: PlanUsageKeyViewHolder, position: Int) {
         val item = items[position]
-        onBindCard(holder.card, item.key, item.isRefreshing)
+        onBindCard(holder.card, item.key, item.isRefreshing, item.latestError)
     }
 
     override fun getItemCount(): Int = items.size
@@ -75,7 +84,8 @@ class PlanUsageKeyAdapter(
      */
     private data class KeyCardItem(
         val key: SavedPlanKey,
-        val isRefreshing: Boolean
+        val isRefreshing: Boolean,
+        val latestError: String?
     )
 
     class PlanUsageKeyViewHolder(val card: LinearLayout) : RecyclerView.ViewHolder(card)

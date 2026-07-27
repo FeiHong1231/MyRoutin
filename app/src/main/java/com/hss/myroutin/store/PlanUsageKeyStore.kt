@@ -8,6 +8,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
+ * 说明：区分正常空数据和无法认证或解析的本机缓存，避免页面把异常情况误展示为“没有 Key”。
+ *
+ * @作者 huangssh
+ * @版本 2.1
+ */
+sealed interface PlanUsageKeyLoadResult {
+
+    /** 本机密文认证和 JSON 解析均成功，可安全使用已读取的 Key。 */
+    data class Loaded(val keys: List<SavedPlanKey>) : PlanUsageKeyLoadResult
+
+    /** 当前设备没有保存过 Key，不需要向用户展示异常提示。 */
+    object Empty : PlanUsageKeyLoadResult
+
+    /** 密文可能来自其他设备、已损坏或当前 Keystore 已失效，禁止继续加载。 */
+    object Unreadable : PlanUsageKeyLoadResult
+}
+
+/**
  * 说明：订阅 Key 列表的本机加密存储入口，负责将全部 Key 与页面缓存作为同一份密文持久化。
  *
  * @作者 huangssh
@@ -28,14 +46,18 @@ class PlanUsageKeyStore(context: Context) {
     }
 
     /**
-     * 仅接受认证通过的密文；密文格式或完整性异常时不返回任何本地 Key。
+     * 仅接受认证通过且完整可解析的密文；异常时返回可识别结果供页面提示用户重新添加。
      */
-    fun loadKeys(): List<SavedPlanKey> {
+    fun loadKeys(): PlanUsageKeyLoadResult {
         val encryptedPayload = preferences.getString(PREF_KEY_ENCRYPTED_PLAN_KEYS, null)
         if (encryptedPayload.isNullOrBlank()) {
-            return emptyList()
+            return PlanUsageKeyLoadResult.Empty
         }
-        return runCatching { decodeKeys(cipher.decrypt(encryptedPayload)) }.getOrDefault(emptyList())
+        return try {
+            PlanUsageKeyLoadResult.Loaded(decodeKeys(cipher.decrypt(encryptedPayload)))
+        } catch (_: Exception) {
+            PlanUsageKeyLoadResult.Unreadable
+        }
     }
 
     /**
@@ -90,32 +112,31 @@ class PlanUsageKeyStore(context: Context) {
      * 旧版本缺少排序字段时，按原来的置顶规则生成顺序号并立即回写，确保升级后卡片顺序不变。
      */
     private fun decodeKeys(json: String): List<SavedPlanKey> {
-        return runCatching {
-            val jsonArray = JSONArray(json)
-            val decodedKeys = (0 until jsonArray.length()).mapNotNull { index ->
-                val jsonObject = jsonArray.optJSONObject(index) ?: return@mapNotNull null
-                jsonObject.toSavedPlanKey()?.let { key ->
-                    DecodedPlanKey(
-                        key = key,
-                        legacyIsPinned = jsonObject.optBoolean("isPinned", false),
-                        originalIndex = index
-                    )
-                }
+        val jsonArray = JSONArray(json)
+        val decodedKeys = (0 until jsonArray.length()).map { index ->
+            val jsonObject = jsonArray.optJSONObject(index)
+                ?: throw IllegalStateException("本地 Key 数据格式无效")
+            val key = jsonObject.toSavedPlanKey()
+                ?: throw IllegalStateException("本地 Key 数据缺少必要字段")
+            DecodedPlanKey(
+                key = key,
+                legacyIsPinned = jsonObject.optBoolean("isPinned", false),
+                originalIndex = index
+            )
+        }
+        return if (decodedKeys.any { it.key.sortOrder == MISSING_SORT_ORDER }) {
+            val migratedKeys = decodedKeys.sortedWith(
+                compareByDescending<DecodedPlanKey> { it.legacyIsPinned }
+                    .thenBy { it.key.createdAt }
+                    .thenBy { it.originalIndex }
+            ).mapIndexed { sortOrder, decodedKey ->
+                decodedKey.key.copy(sortOrder = sortOrder)
             }
-            if (decodedKeys.any { it.key.sortOrder == MISSING_SORT_ORDER }) {
-                val migratedKeys = decodedKeys.sortedWith(
-                    compareByDescending<DecodedPlanKey> { it.legacyIsPinned }
-                        .thenBy { it.key.createdAt }
-                        .thenBy { it.originalIndex }
-                ).mapIndexed { sortOrder, decodedKey ->
-                    decodedKey.key.copy(sortOrder = sortOrder)
-                }
-                saveKeys(migratedKeys)
-                migratedKeys
-            } else {
-                decodedKeys.map { it.key }
-            }
-        }.getOrDefault(emptyList())
+            saveKeys(migratedKeys)
+            migratedKeys
+        } else {
+            decodedKeys.map { it.key }
+        }
     }
 
     /**

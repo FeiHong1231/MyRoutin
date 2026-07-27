@@ -165,6 +165,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
         binding.btnPasteKey.isEnabled = !state.isAddingKey && !state.isRefreshingAll
         binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
+        binding.tvLocalDataWarning.text = state.localDataWarningMessage.orEmpty()
+        binding.tvLocalDataWarning.visibility = if (state.localDataWarningMessage.isNullOrBlank()) {
+            View.GONE
+        } else {
+            View.VISIBLE
+        }
         binding.tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
         binding.rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
         planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)

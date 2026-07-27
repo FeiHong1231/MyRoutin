@@ -7,6 +7,7 @@ import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.repository.PlanUsageQueryResult
 import com.hss.myroutin.repository.PlanUsageRepository
 import com.hss.myroutin.store.PlanUsageKeyStore
+import com.hss.myroutin.store.PlanUsageKeyLoadResult
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,8 +32,15 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     /** 网络请求与接口 JSON 映射由 Repository 处理，ViewModel 只消费查询结果。 */
     private val repository = PlanUsageRepository()
 
+    /** 首次读取结果保留异常语义，避免把不可解密的缓存误认为新用户的空列表。 */
+    private val keyLoadResult = keyStore.loadKeys()
+
     /** 内存中的完整 Key 集合是排序、更新与写回存储时的唯一数据源。 */
-    private val savedPlanKeys = keyStore.loadKeys().toMutableList()
+    private val savedPlanKeys: MutableList<SavedPlanKey> = when (keyLoadResult) {
+        is PlanUsageKeyLoadResult.Loaded -> keyLoadResult.keys.toMutableList()
+        PlanUsageKeyLoadResult.Empty,
+        PlanUsageKeyLoadResult.Unreadable -> mutableListOf()
+    }
 
     /** 仅当前页面会话使用的刷新失败信息，不写入本机缓存。 */
     private val latestErrorByKeyId = mutableMapOf<String, String>()
@@ -40,7 +48,11 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     private val _uiState = MutableStateFlow(
         PlanUsageUiState(
             planKeys = sortedPlanKeys(),
-            isAddKeyPanelVisible = savedPlanKeys.isEmpty()
+            isAddKeyPanelVisible = savedPlanKeys.isEmpty(),
+            localDataWarningMessage = when (keyLoadResult) {
+                PlanUsageKeyLoadResult.Unreadable -> UNREADABLE_LOCAL_DATA_WARNING
+                else -> null
+            }
         )
     )
 
@@ -120,7 +132,9 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
                 current.copy(
                     isAddingKey = false,
                     isAddKeyPanelVisible = false,
-                    refreshStatusText = null
+                    refreshStatusText = null,
+                    // 新 Key 已成功加密写入，旧的异常密文已被覆盖，无需继续保留恢复提示。
+                    localDataWarningMessage = null
                 )
             }
             sendEvent(PlanUsageUiEvent.ClearAddKeyInputs)
@@ -330,6 +344,8 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     private companion object {
         private const val ADD_KEY_REQUEST_TRACE = "[添加 Key]"
         private const val EVENT_BUFFER_CAPACITY = 4
+        private const val UNREADABLE_LOCAL_DATA_WARNING =
+            "本机加密数据无法读取，可能来自其他设备或已失效。为保护 API Key，已忽略该数据；请重新添加 Key。"
     }
 }
 
@@ -348,7 +364,9 @@ data class PlanUsageUiState(
     val isRefreshingAll: Boolean = false,
     val refreshCurrentIndex: Int = 0,
     val refreshTotalCount: Int = 0,
-    val refreshStatusText: String? = null
+    val refreshStatusText: String? = null,
+    /** 仅在启动时读取到异常本地密文时展示，成功写入新 Key 后自动清除。 */
+    val localDataWarningMessage: String? = null
 )
 
 /**

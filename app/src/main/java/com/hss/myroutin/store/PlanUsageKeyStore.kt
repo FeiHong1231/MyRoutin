@@ -6,10 +6,9 @@ import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 
 /**
- * 说明：订阅 Key 列表的 SP 存储入口，负责旧单 Key 数据的无感迁移和每张卡片状态恢复。
+ * 说明：订阅 Key 列表的本机加密存储入口，负责将全部 Key 与页面缓存作为同一份密文持久化。
  *
  * @作者 huangssh
  * @版本 2.1
@@ -17,55 +16,48 @@ import java.util.UUID
 class PlanUsageKeyStore(context: Context) {
 
     /**
-     * 多 Key 数据仍保存在原来的 SP 文件中，升级后可以读取旧版本已保存的 Key。
+     * SharedPreferences 仅承载密文，实际 AES 密钥由 Android Keystore 管理且不可导出。
      */
     private val preferences: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    /**
-     * 优先读取多 Key 列表；旧字段存在时只在首次升级时转为默认 Key。
-     */
-    fun loadKeys(): List<SavedPlanKey> {
-        val savedListJson = preferences.getString(PREF_KEY_PLAN_KEYS, null)
-        if (!savedListJson.isNullOrBlank()) {
-            return decodeKeys(savedListJson)
-        }
-        return migrateLegacyKey()
+    /** 统一加密整份 JSON，避免 Key 与缓存字段被拆分后遗漏保护。 */
+    private val cipher = KeystoreAesGcmCipher()
+
+    init {
+        clearLegacyPlainTextData()
     }
 
     /**
-     * 写入整个列表，确保名称、排序、展开状态和缓存结果始终保持一致。
+     * 仅接受认证通过的密文；密文格式或完整性异常时不返回任何本地 Key。
+     */
+    fun loadKeys(): List<SavedPlanKey> {
+        val encryptedPayload = preferences.getString(PREF_KEY_ENCRYPTED_PLAN_KEYS, null)
+        if (encryptedPayload.isNullOrBlank()) {
+            return emptyList()
+        }
+        return runCatching { decodeKeys(cipher.decrypt(encryptedPayload)) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 加密后写入整个列表，确保名称、排序、展开状态和缓存结果始终保持一致。
      * @param keys 当前全部订阅 Key
      */
     fun saveKeys(keys: List<SavedPlanKey>) {
         preferences.edit()
-            .putString(PREF_KEY_PLAN_KEYS, encodeKeys(keys))
+            .putString(PREF_KEY_ENCRYPTED_PLAN_KEYS, cipher.encrypt(encodeKeys(keys)))
             .apply()
     }
 
     /**
-     * 旧版本只有一个 api_key；将它转换为默认 Key 后再清除旧字段，避免升级丢失配置。
+     * 当前尚未对外分发，首次启用加密存储时直接清除历史明文字段，避免残留敏感数据。
      */
-    private fun migrateLegacyKey(): List<SavedPlanKey> {
-        val legacyApiKey = preferences.getString(PREF_KEY_API_KEY, null).orEmpty().trim()
-        if (legacyApiKey.isBlank()) {
-            return emptyList()
-        }
-        val migratedKey = SavedPlanKey(
-            id = UUID.randomUUID().toString(),
-            name = DEFAULT_KEY_NAME,
-            apiKey = legacyApiKey,
-            createdAt = System.currentTimeMillis(),
-            sortOrder = 0,
-            cachedDayWindowEndAt = preferences.getString(PREF_KEY_DAY_WINDOW_END_AT, null),
-            cachedWeekWindowEndAt = preferences.getString(PREF_KEY_WEEK_WINDOW_END_AT, null)
-        )
+    private fun clearLegacyPlainTextData() {
         preferences.edit()
-            .putString(PREF_KEY_PLAN_KEYS, encodeKeys(listOf(migratedKey)))
+            .remove(PREF_KEY_PLAN_KEYS)
             .remove(PREF_KEY_API_KEY)
             .remove(PREF_KEY_DAY_WINDOW_END_AT)
             .remove(PREF_KEY_WEEK_WINDOW_END_AT)
             .apply()
-        return listOf(migratedKey)
     }
 
     /**
@@ -262,6 +254,7 @@ class PlanUsageKeyStore(context: Context) {
 
     private companion object {
         private const val PREFS_NAME = "plan_usage_input_cache"
+        private const val PREF_KEY_ENCRYPTED_PLAN_KEYS = "encrypted_plan_keys_v1"
         private const val PREF_KEY_PLAN_KEYS = "plan_keys"
         private const val PREF_KEY_API_KEY = "api_key"
         private const val PREF_KEY_DAY_WINDOW_END_AT = "day_window_end_at"

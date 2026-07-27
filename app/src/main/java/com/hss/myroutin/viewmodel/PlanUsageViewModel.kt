@@ -103,11 +103,13 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         updateUiState { it.copy(isAddingKey = true) }
         sendEvent(PlanUsageUiEvent.HideKeyboard)
         viewModelScope.launch {
-            val result = repository.queryPlanUsage(apiKey, ADD_KEY_REQUEST_TRACE)
-            if (result.error != null) {
-                updateUiState { it.copy(isAddingKey = false) }
-                sendEvent(PlanUsageUiEvent.ShowToast("订阅查询失败：${result.error}"))
-                return@launch
+            val usage = when (val result = repository.queryPlanUsage(apiKey, ADD_KEY_REQUEST_TRACE)) {
+                is PlanUsageQueryResult.Failure -> {
+                    updateUiState { it.copy(isAddingKey = false) }
+                    sendEvent(PlanUsageUiEvent.ShowToast("订阅查询失败：${result.error.userMessage}"))
+                    return@launch
+                }
+                is PlanUsageQueryResult.Success -> result.usage
             }
             val now = System.currentTimeMillis()
             val name = rawName.trim().ifBlank { "Key ${savedPlanKeys.size + 1}" }
@@ -118,13 +120,13 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
                 createdAt = now,
                 sortOrder = nextPlanKeySortOrder(),
                 lastUpdatedAt = now,
-                cachedStartAt = result.usage?.startAt,
-                cachedEndAt = result.usage?.endAt,
-                cachedDayWindowStartAt = result.usage?.dayWindowStartAt,
-                cachedDayWindowEndAt = result.usage?.dayWindowEndAt,
-                cachedWeekWindowStartAt = result.usage?.weekWindowStartAt,
-                cachedWeekWindowEndAt = result.usage?.weekWindowEndAt,
-                cachedUsage = result.usage
+                cachedStartAt = usage?.startAt,
+                cachedEndAt = usage?.endAt,
+                cachedDayWindowStartAt = usage?.dayWindowStartAt,
+                cachedDayWindowEndAt = usage?.dayWindowEndAt,
+                cachedWeekWindowStartAt = usage?.weekWindowStartAt,
+                cachedWeekWindowEndAt = usage?.weekWindowEndAt,
+                cachedUsage = usage
             )
             savedPlanKeys.add(addedKey)
             keyStore.saveKeys(savedPlanKeys)
@@ -295,9 +297,12 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      * @param result Repository 返回的查询结果
      */
     private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult) {
-        if (result.error != null) {
-            latestErrorByKeyId[keyId] = result.error
-            return
+        val usage = when (result) {
+            is PlanUsageQueryResult.Failure -> {
+                latestErrorByKeyId[keyId] = result.error.userMessage
+                return
+            }
+            is PlanUsageQueryResult.Success -> result.usage
         }
         latestErrorByKeyId.remove(keyId)
         val index = savedPlanKeys.indexOfFirst { it.id == keyId }
@@ -307,13 +312,13 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         val planKey = savedPlanKeys[index]
         savedPlanKeys[index] = planKey.copy(
             lastUpdatedAt = System.currentTimeMillis(),
-            cachedStartAt = result.usage?.startAt ?: planKey.cachedStartAt,
-            cachedEndAt = result.usage?.endAt ?: planKey.cachedEndAt,
-            cachedDayWindowStartAt = result.usage?.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
-            cachedDayWindowEndAt = result.usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
-            cachedWeekWindowStartAt = result.usage?.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
-            cachedWeekWindowEndAt = result.usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
-            cachedUsage = result.usage
+            cachedStartAt = usage?.startAt ?: planKey.cachedStartAt,
+            cachedEndAt = usage?.endAt ?: planKey.cachedEndAt,
+            cachedDayWindowStartAt = usage?.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
+            cachedDayWindowEndAt = usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
+            cachedWeekWindowStartAt = usage?.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
+            cachedWeekWindowEndAt = usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
+            cachedUsage = usage
         )
         keyStore.saveKeys(savedPlanKeys)
     }

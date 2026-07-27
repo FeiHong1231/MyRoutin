@@ -3,12 +3,16 @@ package com.hss.myroutin.repository
 import android.util.Log
 import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.model.PlanUsageSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONException
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.SocketTimeoutException
+import java.io.IOException
 
 /**
  * 说明：订阅额度接口的数据入口，负责在 IO 线程完成鉴权请求、响应校验和 JSON 到领域模型的映射。
@@ -22,7 +26,7 @@ class PlanUsageRepository(
 ) {
 
     /**
-     * 查询一个订阅 Key 的当前用量；网络和服务端异常统一转换为页面可展示的错误文案。
+     * 查询一个订阅 Key 的当前用量；失败原因转换为稳定类型，调用方不再依赖底层异常文案。
      * @param apiKey 用户输入的订阅 Key，仅以脱敏形式写入 Debug 日志
      * @param requestTrace 当前请求的来源和批次标识
      */
@@ -33,17 +37,35 @@ class PlanUsageRepository(
                 "$requestTrace 请求：GET $endpoint，Authorization=Bearer ${maskKey(apiKey)}，Accept=application/json"
             }
             try {
-                val usage = requestUsage(apiKey, requestTrace)
+                val result = requestUsage(apiKey, requestTrace)
                 logDebug {
                     "$requestTrace 请求完成，耗时 ${System.currentTimeMillis() - requestStartedAt}ms，" +
-                        "解析结果=${if (usage == null) "空订阅" else "成功"}"
+                        "结果=${result.debugDescription()}"
                 }
-                PlanUsageQueryResult(usage, null)
-            } catch (throwable: Throwable) {
-                logDebug(throwable) {
+                result
+            } catch (exception: CancellationException) {
+                // 页面销毁或 ViewModel 清理时必须保留取消信号，禁止误报为一次请求失败。
+                throw exception
+            } catch (exception: SocketTimeoutException) {
+                logDebug(exception) {
                     "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
                 }
-                PlanUsageQueryResult(null, throwable.message ?: "查询失败")
+                PlanUsageQueryResult.Failure(PlanUsageQueryError.NetworkTimeout)
+            } catch (exception: IOException) {
+                logDebug(exception) {
+                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
+                }
+                PlanUsageQueryResult.Failure(PlanUsageQueryError.NetworkUnavailable)
+            } catch (exception: JSONException) {
+                logDebug(exception) {
+                    "$requestTrace 服务响应解析失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
+                }
+                PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidResponse)
+            } catch (exception: Exception) {
+                logDebug(exception) {
+                    "$requestTrace 订阅额度查询出现未分类异常，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
+                }
+                PlanUsageQueryResult.Failure(PlanUsageQueryError.Unknown)
             }
         }
     }
@@ -53,7 +75,7 @@ class PlanUsageRepository(
      * @param apiKey 用户输入并保存到本地的订阅 Key
      * @param requestTrace 当前请求的来源和批次标识
      */
-    private fun requestUsage(apiKey: String, requestTrace: String): PlanUsageSnapshot? {
+    private fun requestUsage(apiKey: String, requestTrace: String): PlanUsageQueryResult {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MILLIS
@@ -70,16 +92,16 @@ class PlanUsageRepository(
             })?.bufferedReader()?.use { it.readText() }.orEmpty()
             logDebugResponse(requestTrace, responseCode, connection.headerFields, responseText)
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-                throw IllegalStateException("鉴权失败 invalid_api_key")
+                return PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidApiKey)
             }
             if (responseCode !in 200..299) {
-                throw IllegalStateException("HTTP $responseCode")
+                return PlanUsageQueryResult.Failure(PlanUsageQueryError.Http(responseCode))
             }
             val body = responseText.trim()
             if (body.isEmpty() || body == "null") {
-                return null
+                return PlanUsageQueryResult.Success(null)
             }
-            return parseUsage(JSONObject(body))
+            return PlanUsageQueryResult.Success(parseUsage(JSONObject(body)))
         } finally {
             connection.disconnect()
         }
@@ -234,6 +256,14 @@ class PlanUsageRepository(
         }
     }
 
+    /** 将强类型结果压缩为仅供 Debug 日志使用的描述，Release 包不会输出该内容。 */
+    private fun PlanUsageQueryResult.debugDescription(): String {
+        return when (this) {
+            is PlanUsageQueryResult.Success -> if (usage == null) "空订阅" else "成功"
+            is PlanUsageQueryResult.Failure -> "失败：${error.javaClass.simpleName}"
+        }
+    }
+
     private companion object {
         private const val PLAN_USAGE_LOG_TAG = "PlanUsageQuery"
         private const val MAX_LOG_CHUNK_SIZE = 3_000
@@ -245,12 +275,58 @@ class PlanUsageRepository(
 }
 
 /**
- * 说明：单 Key 查询结果，允许成功空订阅和失败状态共用同一套状态更新入口。
+ * 说明：单 Key 查询的强类型结果，成功空订阅与请求失败在类型层面明确区分。
  *
  * @作者 huangssh
  * @版本 2.1
  */
-data class PlanUsageQueryResult(
-    val usage: PlanUsageSnapshot?,
-    val error: String?
-)
+sealed interface PlanUsageQueryResult {
+
+    /** 请求成功，usage 为 null 时表示该 Key 当前没有可展示订阅。 */
+    data class Success(val usage: PlanUsageSnapshot?) : PlanUsageQueryResult
+
+    /** 请求未成功，错误类型只携带安全的展示语义，不暴露底层异常或服务端原文。 */
+    data class Failure(val error: PlanUsageQueryError) : PlanUsageQueryResult
+}
+
+/**
+ * 说明：订阅请求的稳定失败分类，供页面展示、后续重试策略和自动测试按类型处理。
+ *
+ * @作者 huangssh
+ * @版本 2.1
+ */
+sealed interface PlanUsageQueryError {
+
+    /** 页面使用该文案，不会显示异常栈、接口响应体或完整请求信息。 */
+    val userMessage: String
+
+    object InvalidApiKey : PlanUsageQueryError {
+        override val userMessage = "API Key 无效或已失效"
+    }
+
+    data class Http(val responseCode: Int) : PlanUsageQueryError {
+        override val userMessage: String
+            get() = when (responseCode) {
+                HttpURLConnection.HTTP_FORBIDDEN -> "当前 Key 无访问权限（HTTP 403）"
+                429 -> "请求过于频繁，请稍后重试（HTTP 429）"
+                in 500..599 -> "服务暂时不可用，请稍后重试（HTTP $responseCode）"
+                else -> "请求失败（HTTP $responseCode）"
+            }
+    }
+
+    object NetworkTimeout : PlanUsageQueryError {
+        override val userMessage = "网络连接超时，请检查网络后重试"
+    }
+
+    object NetworkUnavailable : PlanUsageQueryError {
+        override val userMessage = "网络连接失败，请检查网络后重试"
+    }
+
+    object InvalidResponse : PlanUsageQueryError {
+        override val userMessage = "服务返回的数据格式异常，请稍后重试"
+    }
+
+    object Unknown : PlanUsageQueryError {
+        override val userMessage = "查询失败，请稍后重试"
+    }
+}

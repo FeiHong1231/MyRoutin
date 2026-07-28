@@ -1,12 +1,13 @@
 pluginManagement {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        // 官方仓库优先，避免第三方镜像的 5xx 响应阻断 GitHub Actions 依赖解析。
         google()
         mavenCentral()
         gradlePluginPortal()
 
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://mirrors.cloud.tencent.com/gradle/' }
         maven { url 'https://maven.aliyun.com/repository/central' }
     }
@@ -14,11 +15,12 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        // 应用依赖同样先访问官方源，国内镜像只承担网络不可达时的备用职责。
         google()
         mavenCentral()
 
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://mirrors.cloud.tencent.com/gradle/' }
         maven { url 'https://maven.aliyun.com/repository/central' }
     }

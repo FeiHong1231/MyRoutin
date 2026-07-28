@@ -42,7 +42,7 @@ import java.util.Locale
  * 说明：订阅 Key 用量查询页，负责页面状态渲染和页面级交互；卡片格式化与绑定由 Adapter 处理。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 class PlanUsageInputActivity : AppCompatActivity() {
 
@@ -253,6 +253,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
         when (val cardState = state.cardState) {
             AppUpdateCardState.Hidden -> {
+                binding.ucpUpdateProgress.isIndeterminate = false
                 binding.llUpdateCard.visibility = View.GONE
             }
 
@@ -317,6 +318,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         )
         binding.btnToggleUpdateDownload.contentDescription = if (isPaused) "继续下载" else "暂停下载"
         binding.btnDismissUpdate.contentDescription = if (isPaused) "关闭更新提示" else "取消下载"
+        binding.ucpUpdateProgress.isIndeterminate = false
         binding.ucpUpdateProgress.progress = downloadPercent ?: 0
     }
 
@@ -327,6 +329,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.tvUpdateDetail.text = "正在连接 GitHub Release"
         binding.flUpdateProgress.visibility = View.VISIBLE
         binding.ucpUpdateProgress.progress = 0
+        binding.ucpUpdateProgress.isIndeterminate = true
         binding.btnUpdateAction.visibility = View.GONE
         binding.btnToggleUpdateDownload.visibility = View.GONE
         binding.btnDismissUpdate.contentDescription = "取消检查更新"
@@ -343,6 +346,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.tvUpdateTitle.text = title
         binding.tvUpdateDetail.text = detail
         binding.flUpdateProgress.visibility = View.GONE
+        binding.ucpUpdateProgress.isIndeterminate = false
         binding.btnUpdateAction.visibility = View.VISIBLE
         binding.btnToggleUpdateDownload.visibility = View.GONE
         binding.btnUpdateAction.text = actionText

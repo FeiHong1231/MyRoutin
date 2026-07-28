@@ -1,18 +1,20 @@
 package com.hss.myroutin.widget
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.LinearInterpolator
 import com.hss.myroutin.R
 
 /**
  * 说明：更新卡片的圆形下载进度，只绘制圆环底轨和进度弧，中心状态图标由布局中的 ImageView 承接。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 class UpdateCircleProgressView @JvmOverloads constructor(
     context: Context,
@@ -30,6 +32,23 @@ class UpdateCircleProgressView @JvmOverloads constructor(
                 return
             }
             field = safeProgress
+            invalidate()
+        }
+
+    /**
+     * 检查更新时使用无确定进度的旋转弧，下载开始后恢复为与真实字节数对应的固定进度。
+     */
+    var isIndeterminate: Boolean = false
+        set(value) {
+            if (field == value) {
+                return
+            }
+            field = value
+            if (value) {
+                startIndeterminateAnimation()
+            } else {
+                stopIndeterminateAnimation()
+            }
             invalidate()
         }
 
@@ -58,6 +77,12 @@ class UpdateCircleProgressView @JvmOverloads constructor(
      */
     private val arcRect = RectF()
 
+    /** 检查更新的旋转动画仅在 View 已附着且状态有效时运行，避免卡片隐藏后继续重绘。 */
+    private var indeterminateAnimator: ValueAnimator? = null
+
+    /** 当前无确定进度弧线的起始角度，由动画实时更新。 */
+    private var indeterminateStartAngle = START_ANGLE
+
     /**
      * 根据当前 View 尺寸绘制完整轨道和当前进度弧，中心播放/暂停图标不在此处绘制。
      */
@@ -83,7 +108,62 @@ class UpdateCircleProgressView @JvmOverloads constructor(
             centerY + radius - strokeInset
         )
         canvas.drawArc(arcRect, START_ANGLE, FULL_SWEEP_ANGLE, false, trackPaint)
-        canvas.drawArc(arcRect, START_ANGLE, progress * PROGRESS_TO_SWEEP_FACTOR, false, progressPaint)
+        if (isIndeterminate) {
+            canvas.drawArc(
+                arcRect,
+                indeterminateStartAngle,
+                INDETERMINATE_SWEEP_ANGLE,
+                false,
+                progressPaint
+            )
+        } else {
+            canvas.drawArc(
+                arcRect,
+                START_ANGLE,
+                progress * PROGRESS_TO_SWEEP_FACTOR,
+                false,
+                progressPaint
+            )
+        }
+    }
+
+    /** View 重新显示时恢复检查更新动画，确保页面重建后不会停在静态弧线。 */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (isIndeterminate) {
+            startIndeterminateAnimation()
+        }
+    }
+
+    /** View 离开窗口时停止动画，避免隐藏卡片仍持续占用主线程绘制。 */
+    override fun onDetachedFromWindow() {
+        stopIndeterminateAnimation()
+        super.onDetachedFromWindow()
+    }
+
+    /** 启动匀速旋转的加载弧；仅用于远端检查，下载过程始终显示真实百分比。 */
+    private fun startIndeterminateAnimation() {
+        if (!isAttachedToWindow || indeterminateAnimator?.isRunning == true) {
+            return
+        }
+        if (indeterminateAnimator == null) {
+            indeterminateAnimator = ValueAnimator.ofFloat(START_ANGLE, START_ANGLE + FULL_SWEEP_ANGLE).apply {
+                duration = INDETERMINATE_ANIMATION_DURATION_MILLIS
+                interpolator = LinearInterpolator()
+                repeatCount = ValueAnimator.INFINITE
+                addUpdateListener { animator ->
+                    indeterminateStartAngle = animator.animatedValue as Float
+                    invalidate()
+                }
+            }
+        }
+        indeterminateAnimator?.start()
+    }
+
+    /** 停止并复位加载弧，防止下一次检查从随机角度开始。 */
+    private fun stopIndeterminateAnimation() {
+        indeterminateAnimator?.cancel()
+        indeterminateStartAngle = START_ANGLE
     }
 
     companion object {
@@ -95,6 +175,8 @@ class UpdateCircleProgressView @JvmOverloads constructor(
         private const val START_ANGLE = -90f
         private const val FULL_SWEEP_ANGLE = 360f
         private const val PROGRESS_TO_SWEEP_FACTOR = FULL_SWEEP_ANGLE / MAX_PROGRESS
+        private const val INDETERMINATE_SWEEP_ANGLE = 90f
+        private const val INDETERMINATE_ANIMATION_DURATION_MILLIS = 900L
 
         /**
          * 圆环线宽按更新卡片 40dp 的圆形点击区域确定，需为中心操作图标预留可辨识空间。

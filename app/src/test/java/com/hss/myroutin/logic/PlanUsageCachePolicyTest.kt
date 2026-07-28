@@ -1,5 +1,6 @@
 package com.hss.myroutin.logic
 
+import com.hss.myroutin.model.PlanUsageLegacyPeriod
 import com.hss.myroutin.model.PlanUsageQueryStatus
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
@@ -60,8 +61,41 @@ class PlanUsageCachePolicyTest {
     }
 
     @Test
+    fun expiredResult_preservesMigratedLegacyPeriod() {
+        val legacyPeriod = PlanUsageLegacyPeriod(
+            startAt = "2020-01-01T00:00:00Z",
+            endAt = "2020-02-01T00:00:00Z",
+            dayWindowStartAt = null,
+            dayWindowEndAt = null,
+            weekWindowStartAt = null,
+            weekWindowEndAt = null
+        )
+        val original = SavedPlanKey(
+            id = "key-id",
+            name = "Test Key",
+            apiKey = "plan-test-key",
+            createdAt = LAST_UPDATED_AT,
+            lastUpdatedAt = LAST_UPDATED_AT,
+            legacyPeriod = legacyPeriod
+        )
+
+        val updated = PlanUsageCachePolicy.applyExpired(original, CHECKED_AT)
+
+        assertSame(legacyPeriod, updated.legacyPeriod)
+        assertEquals(PlanUsageQueryStatus.EXPIRED, updated.queryStatus)
+    }
+
+    @Test
     fun availableResult_replacesSnapshotAndRestoresActiveStatus() {
         val original = createPlanKey(createUsage()).copy(
+            legacyPeriod = PlanUsageLegacyPeriod(
+                startAt = "legacy",
+                endAt = null,
+                dayWindowStartAt = null,
+                dayWindowEndAt = null,
+                weekWindowStartAt = null,
+                weekWindowEndAt = null
+            ),
             queryStatus = PlanUsageQueryStatus.EXPIRED
         )
         val latestUsage = createUsage(dailyUsedUsd = 10.0, weeklyUsedUsd = 30.0)
@@ -73,6 +107,7 @@ class PlanUsageCachePolicyTest {
         )
 
         assertSame(latestUsage, updated.cachedUsage)
+        assertNull(updated.legacyPeriod)
         assertEquals(CHECKED_AT, updated.lastUpdatedAt ?: -1L)
         assertEquals(CHECKED_AT, updated.lastCheckedAt ?: -1L)
         assertEquals(PlanUsageQueryStatus.ACTIVE, updated.queryStatus)

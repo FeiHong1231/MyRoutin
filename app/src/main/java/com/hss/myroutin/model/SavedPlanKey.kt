@@ -15,14 +15,10 @@ data class SavedPlanKey(
     val sortOrder: Int = 0,
     /** 最近一次拿到有效额度快照的时间，过期或 Key 失效结果不得覆盖该时间。 */
     val lastUpdatedAt: Long? = null,
-    val cachedStartAt: String? = null,
-    val cachedEndAt: String? = null,
-    val cachedDayWindowStartAt: String? = null,
-    val cachedDayWindowEndAt: String? = null,
-    val cachedWeekWindowStartAt: String? = null,
-    val cachedWeekWindowEndAt: String? = null,
     /** 最近一次非空额度快照；订阅过期或 Key 失效时保留，用于继续展示最后有效数据。 */
     val cachedUsage: PlanUsageSnapshot? = null,
+    /** 仅承接旧版本已经丢失额度快照但仍保留的周期时间，新有效快照会清除此对象。 */
+    val legacyPeriod: PlanUsageLegacyPeriod? = null,
     /** 最近一次得到确定业务结果的时间，包含有效快照、订阅过期和 Key 失效。 */
     val lastCheckedAt: Long? = lastUpdatedAt,
     /** 最新一次确定的查询状态，与最后有效额度快照分开保存。 */
@@ -44,6 +40,33 @@ enum class PlanUsageQueryStatus {
     EXPIRED,
     INVALID_API_KEY,
     UNKNOWN
+}
+
+/**
+ * 说明：旧缓存的周期时间兼容对象，只在完整用量快照已丢失时保留迁移后仍可展示的信息。
+ *
+ * @作者 huangssh
+ * @版本 2.3
+ */
+data class PlanUsageLegacyPeriod(
+    val startAt: String?,
+    val endAt: String?,
+    val dayWindowStartAt: String?,
+    val dayWindowEndAt: String?,
+    val weekWindowStartAt: String?,
+    val weekWindowEndAt: String?
+) {
+    /** 防止空兼容对象进入当前缓存格式。 */
+    fun hasAnyValue(): Boolean {
+        return listOf(
+            startAt,
+            endAt,
+            dayWindowStartAt,
+            dayWindowEndAt,
+            weekWindowStartAt,
+            weekWindowEndAt
+        ).any { !it.isNullOrBlank() }
+    }
 }
 
 /**

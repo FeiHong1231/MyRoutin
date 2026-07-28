@@ -4,6 +4,7 @@ import android.util.Log
 import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.logic.PlanUsageFormatter
 import com.hss.myroutin.model.PlanUsageSnapshot
+import com.hss.myroutin.serialization.PlanUsageSnapshotJsonCodec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -119,7 +120,7 @@ class PlanUsageRepository(
         if (body.isEmpty()) {
             return PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidResponse)
         }
-        return PlanUsageQueryResult.Available(parseUsage(JSONObject(body)))
+        return PlanUsageQueryResult.Available(PlanUsageSnapshotJsonCodec.decode(JSONObject(body)))
     }
 
     /**
@@ -177,89 +178,6 @@ class PlanUsageRepository(
         if (BuildConfig.DEBUG) {
             Log.e(PLAN_USAGE_LOG_TAG, message(), throwable)
         }
-    }
-
-    /**
-     * 将接口 JSON 映射成页面展示所需字段，接口额外字段不会进入上层状态。
-     * @param jsonObject 接口返回的订阅用量 JSON
-     */
-    private fun parseUsage(jsonObject: JSONObject): PlanUsageSnapshot {
-        val allowedModels = jsonObject.optJSONArray("allowedModels")?.let { jsonArray ->
-            (0 until jsonArray.length()).mapNotNull { index ->
-                jsonArray.optString(index).takeIf { it.isNotBlank() }
-            }
-        }.orEmpty()
-        val allowedGroups = jsonObject.optJSONArray("allowedGroups")?.let { jsonArray ->
-            (0 until jsonArray.length()).mapNotNull { index ->
-                jsonArray.optString(index).takeIf { it.isNotBlank() }
-            }
-        }.orEmpty()
-        return PlanUsageSnapshot(
-            planName = jsonObject.stringOrNull("planName"),
-            type = jsonObject.intOrNull("type"),
-            status = jsonObject.intOrNull("status"),
-            startAt = jsonObject.stringOrNull("startAt"),
-            endAt = jsonObject.stringOrNull("endAt"),
-            dailyLimitUsd = jsonObject.doubleOrNull("dailyLimitUsd"),
-            weeklyLimitUsd = jsonObject.doubleOrNull("weeklyLimitUsd"),
-            dailyUsedUsd = jsonObject.doubleOrNull("dailyUsedUsd"),
-            weeklyUsedUsd = jsonObject.doubleOrNull("weeklyUsedUsd"),
-            dailyRemainingUsd = jsonObject.doubleOrNull("dailyRemainingUsd"),
-            weeklyRemainingUsd = jsonObject.doubleOrNull("weeklyRemainingUsd"),
-            dayWindowStartAt = jsonObject.stringOrNull("dayWindowStartAt"),
-            dayWindowEndAt = jsonObject.stringOrNull("dayWindowEndAt"),
-            weekWindowStartAt = jsonObject.stringOrNull("weekWindowStartAt"),
-            weekWindowEndAt = jsonObject.stringOrNull("weekWindowEndAt"),
-            totalTokens = jsonObject.longOrNull("totalTokens"),
-            consumedTokens = jsonObject.longOrNull("consumedTokens"),
-            remainingTokens = jsonObject.longOrNull("remainingTokens"),
-            allowedModels = allowedModels,
-            allowedGroups = allowedGroups,
-            groupNames = jsonObject.stringMapOrEmpty("groupNames"),
-            groupMultipliers = jsonObject.doubleMapOrEmpty("groupMultipliers")
-        )
-    }
-
-    private fun JSONObject.stringOrNull(name: String): String? {
-        return if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotBlank() } else null
-    }
-
-    private fun JSONObject.intOrNull(name: String): Int? {
-        return if (has(name) && !isNull(name)) optInt(name) else null
-    }
-
-    private fun JSONObject.longOrNull(name: String): Long? {
-        return optLong(name, Long.MIN_VALUE).takeIf { it != Long.MIN_VALUE }
-    }
-
-    private fun JSONObject.doubleOrNull(name: String): Double? {
-        return optDouble(name, Double.NaN).takeIf { !it.isNaN() }
-    }
-
-    private fun JSONObject.stringMapOrEmpty(name: String): Map<String, String> {
-        val mapObject = optJSONObject(name) ?: return emptyMap()
-        val result = linkedMapOf<String, String>()
-        val keys = mapObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            mapObject.stringOrNull(key)?.let { value ->
-                result[key] = value
-            }
-        }
-        return result
-    }
-
-    private fun JSONObject.doubleMapOrEmpty(name: String): Map<String, Double> {
-        val mapObject = optJSONObject(name) ?: return emptyMap()
-        val result = linkedMapOf<String, Double>()
-        val keys = mapObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            mapObject.doubleOrNull(key)?.let { value ->
-                result[key] = value
-            }
-        }
-        return result
     }
 
     /** 将强类型结果压缩为仅供 Debug 日志使用的描述，Release 包不会输出该内容。 */

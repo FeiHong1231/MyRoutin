@@ -24,21 +24,17 @@ import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.update.AppUpdateCardState
 import com.hss.myroutin.update.AppUpdateManifest
 import com.hss.myroutin.update.AppUpdateUiEvent
-import com.hss.myroutin.update.AppUpdateUiState
 import com.hss.myroutin.update.AppUpdateViewModel
-import com.hss.myroutin.update.UpdateDownloadProgress
 import com.hss.myroutin.update.UpdateInstallResult
 import com.hss.myroutin.update.UpdateInstaller
 import com.hss.myroutin.viewmodel.PlanUsageUiEvent
-import com.hss.myroutin.viewmodel.PlanUsageUiState
 import com.hss.myroutin.viewmodel.PlanUsageViewModel
 import com.hss.myroutin.widget.MyToastD
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.Locale
 
 /**
- * 说明：订阅 Key 用量查询页，负责页面状态渲染和页面级交互；卡片格式化与绑定由 Adapter 处理。
+ * 说明：订阅 Key 用量查询页，负责生命周期和页面级交互；状态展示由独立 Renderer 处理。
  *
  * @作者 huangssh
  * @版本 2.3
@@ -62,6 +58,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
 
     /** Adapter 自行绑定卡片内容，Activity 只接收展开与管理等页面级回调。 */
     private lateinit var planUsageKeyAdapter: PlanUsageKeyAdapter
+
+    /** 页面 Renderer 统一消费 Key 查询状态，避免 Activity 直接维护控件展示分支。 */
+    private lateinit var pageRenderer: PlanUsagePageRenderer
+
+    /** 更新卡片 Renderer 统一维护检查和下载状态的视觉映射。 */
+    private lateinit var appUpdateCardRenderer: AppUpdateCardRenderer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,6 +111,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
             onTogglePlanKey = viewModel::togglePlanKeyExpansion,
             onManagePlanKey = ::showPlanKeyMenu
         )
+        pageRenderer = PlanUsagePageRenderer(binding, planUsageKeyAdapter)
+        appUpdateCardRenderer = AppUpdateCardRenderer(binding)
         binding.rvPlanKeys.adapter = planUsageKeyAdapter
         binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
         binding.btnRefreshAll.setOnClickListener { refreshAllPlanKeys() }
@@ -140,13 +144,13 @@ class PlanUsageInputActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    viewModel.uiState.collect(::renderPage)
+                    viewModel.uiState.collect(pageRenderer::render)
                 }
                 launch {
                     viewModel.events.collect(::handleUiEvent)
                 }
                 launch {
-                    appUpdateViewModel.uiState.collect(::renderUpdateCard)
+                    appUpdateViewModel.uiState.collect(appUpdateCardRenderer::render)
                 }
                 launch {
                     appUpdateViewModel.events.collect(::handleUpdateUiEvent)
@@ -202,157 +206,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
         MyToastD.show("已粘贴")
     }
 
-    /**
-     * 依据 ViewModel 输出的唯一状态刷新页面级控件，卡片详情由 Adapter 接收同一状态后独立绑定。
-     * @param state 当前页面的完整渲染状态
-     */
-    private fun renderPage(state: PlanUsageUiState) {
-        val isLocalDataReady = !state.isLoadingLocalData
-        binding.tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
-        binding.tvRefreshStatus.text = when {
-            state.isRefreshingAll -> "刷新中 ${state.refreshCurrentIndex}/${state.refreshTotalCount}"
-            !state.refreshStatusText.isNullOrBlank() -> state.refreshStatusText
-            else -> ""
-        }
-        binding.tvRefreshStatus.visibility = if (binding.tvRefreshStatus.text.isNullOrBlank()) {
-            View.GONE
-        } else {
-            View.VISIBLE
-        }
-        binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll
-        binding.btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
-        binding.btnRefreshAll.isEnabled =
-            isLocalDataReady &&
-            state.planKeys.isNotEmpty() &&
-            !state.isAddingKey &&
-            !state.isRefreshingAll
-        binding.btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
-        binding.btnQueryAndAdd.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
-        binding.btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
-        binding.btnPasteKey.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
-        binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
-        binding.tvLocalDataWarning.text = state.localDataWarningMessage.orEmpty()
-        binding.tvLocalDataWarning.visibility = if (state.localDataWarningMessage.isNullOrBlank()) {
-            View.GONE
-        } else {
-            View.VISIBLE
-        }
-        binding.tvEmptyHint.visibility = if (isLocalDataReady && state.planKeys.isEmpty()) View.VISIBLE else View.GONE
-        binding.rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
-        planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)
-    }
-
-    /**
-     * 依据更新状态显示或隐藏首页下载卡片；环形进度只在应用停留前台时出现。
-     * @param state 当前更新检查、下载或安装入口状态
-     */
-    private fun renderUpdateCard(state: AppUpdateUiState) {
-        if (state.isChecking && state.isManualChecking && state.cardState is AppUpdateCardState.Hidden) {
-            showUpdateCheckingCard()
-            return
-        }
-        when (val cardState = state.cardState) {
-            AppUpdateCardState.Hidden -> {
-                binding.ucpUpdateProgress.isIndeterminate = false
-                binding.llUpdateCard.visibility = View.GONE
-            }
-
-            is AppUpdateCardState.Available -> {
-                showUpdateActionCard(
-                    title = "发现新版本 ${formatUpdateVersion(cardState.update.versionName)}",
-                    detail = "已准备好下载",
-                    actionText = "下载更新"
-                )
-            }
-
-            is AppUpdateCardState.Downloading -> {
-                showDownloadProgress(cardState.update, cardState.progress, isPaused = false)
-            }
-
-            is AppUpdateCardState.Paused -> {
-                showDownloadProgress(cardState.update, cardState.progress, isPaused = true)
-            }
-
-            is AppUpdateCardState.DownloadFailed -> {
-                showUpdateActionCard(
-                    title = "下载失败",
-                    detail = cardState.userMessage,
-                    actionText = "重试"
-                )
-            }
-
-            is AppUpdateCardState.Downloaded -> {
-                showUpdateActionCard(
-                    title = "新版本 ${formatUpdateVersion(cardState.update.versionName)} 已下载",
-                    detail = "安装包已完成校验",
-                    actionText = "立即安装"
-                )
-            }
-        }
-    }
-
-    /**
-     * 将下载中和已暂停状态统一映射到圆环与中心图标，点击中心图标可在暂停和继续之间切换。
-     * @param update 当前下载的版本信息
-     * @param progress 已下载字节与总字节进度
-     * @param isPaused 是否展示继续下载入口
-     */
-    private fun showDownloadProgress(
-        update: AppUpdateManifest,
-        progress: UpdateDownloadProgress,
-        isPaused: Boolean
-    ) {
-        val downloadPercent = calculateDownloadPercent(progress)
-        binding.llUpdateCard.visibility = View.VISIBLE
-        binding.tvUpdateTitle.text = if (isPaused) {
-            "新版本 ${formatUpdateVersion(update.versionName)} 已暂停"
-        } else {
-            "新版本 ${formatUpdateVersion(update.versionName)} 正在下载${downloadPercent?.let { " $it%" }.orEmpty()}"
-        }
-        binding.tvUpdateDetail.text = formatDownloadProgress(progress)
-        binding.flUpdateProgress.visibility = View.VISIBLE
-        binding.btnUpdateAction.visibility = View.GONE
-        binding.btnToggleUpdateDownload.visibility = View.VISIBLE
-        binding.btnToggleUpdateDownload.setImageResource(
-            if (isPaused) R.drawable.ic_update_float_play else R.drawable.ic_update_float_pause
-        )
-        binding.btnToggleUpdateDownload.contentDescription = if (isPaused) "继续下载" else "暂停下载"
-        binding.btnDismissUpdate.contentDescription = if (isPaused) "关闭更新提示" else "取消下载"
-        binding.ucpUpdateProgress.isIndeterminate = false
-        binding.ucpUpdateProgress.progress = downloadPercent ?: 0
-    }
-
-    /** 手动检查时明确展示当前请求状态，避免用户只看到“正在处理”却不知道请求是否仍在进行。 */
-    private fun showUpdateCheckingCard() {
-        binding.llUpdateCard.visibility = View.VISIBLE
-        binding.tvUpdateTitle.text = "正在检查更新"
-        binding.tvUpdateDetail.text = "正在连接 GitHub Release"
-        binding.flUpdateProgress.visibility = View.VISIBLE
-        binding.ucpUpdateProgress.progress = 0
-        binding.ucpUpdateProgress.isIndeterminate = true
-        binding.btnUpdateAction.visibility = View.GONE
-        binding.btnToggleUpdateDownload.visibility = View.GONE
-        binding.btnDismissUpdate.contentDescription = "取消检查更新"
-    }
-
-    /**
-     * 渲染可点击操作的更新卡片，下载完成、待下载和失败重试共用同一套视觉结构。
-     * @param title 卡片主标题
-     * @param detail 卡片辅助说明
-     * @param actionText 右侧操作按钮文案
-     */
-    private fun showUpdateActionCard(title: String, detail: String, actionText: String) {
-        binding.llUpdateCard.visibility = View.VISIBLE
-        binding.tvUpdateTitle.text = title
-        binding.tvUpdateDetail.text = detail
-        binding.flUpdateProgress.visibility = View.GONE
-        binding.ucpUpdateProgress.isIndeterminate = false
-        binding.btnUpdateAction.visibility = View.VISIBLE
-        binding.btnToggleUpdateDownload.visibility = View.GONE
-        binding.btnUpdateAction.text = actionText
-        binding.btnDismissUpdate.contentDescription = "关闭更新提示"
-    }
-
     /** 根据当前更新卡片状态开始下载、重试下载，或打开系统安装页。 */
     private fun handleUpdateAction() {
         when (val cardState = appUpdateViewModel.uiState.value.cardState) {
@@ -374,7 +227,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("新版本 ${formatUpdateVersion(update.versionName)} 已下载")
+            .setTitle("新版本 ${appUpdateCardRenderer.formatVersion(update.versionName)} 已下载")
             .setMessage("安装包已完成校验，是否立即安装？")
             .setNegativeButton("稍后", null)
             .setPositiveButton("立即安装") { _, _ -> requestInstall(apkFile) }
@@ -405,47 +258,6 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 }
             }
             .show()
-    }
-
-    /**
-     * 将字节数以可读单位展示，不足 1 MB 时保留 KB，方便用户判断下载是否正常推进。
-     * @param bytes 已下载或总计的字节数
-     * @return 适合下载卡片展示的文件大小
-     */
-    private fun formatDataSize(bytes: Long): String {
-        return if (bytes < BYTES_PER_MEGABYTE) {
-            "${bytes / BYTES_PER_KILOBYTE} KB"
-        } else {
-            String.format(Locale.getDefault(), "%.1f MB", bytes / BYTES_PER_MEGABYTE.toDouble())
-        }
-    }
-
-    /**
-     * 组合实时下载量和远端文件大小；服务端未返回大小时仍展示已下载字节数。
-     * @param progress 当前下载进度
-     * @return 下载卡片的辅助文案
-     */
-    private fun formatDownloadProgress(progress: UpdateDownloadProgress): String {
-        return progress.totalBytes?.let { totalBytes ->
-            "${formatDataSize(progress.downloadedBytes)} / ${formatDataSize(totalBytes)}"
-        } ?: "${formatDataSize(progress.downloadedBytes)} 已下载"
-    }
-
-    /**
-     * 将字节进度转换为标题和圆环共用的整数百分比；未提供有效总大小时不虚构进度。
-     * @param progress 当前下载进度
-     * @return 0 到 100 的百分比，未知总大小时为 null
-     */
-    private fun calculateDownloadPercent(progress: UpdateDownloadProgress): Int? {
-        val totalBytes = progress.totalBytes?.takeIf { it > 0L } ?: return null
-        return ((progress.downloadedBytes.toDouble() / totalBytes) * UPDATE_PROGRESS_MAX)
-            .toInt()
-            .coerceIn(0, UPDATE_PROGRESS_MAX)
-    }
-
-    /** 统一为远端版本号补充 v 前缀，避免发布清单误填 v2.2 时展示成 vv2.2。 */
-    private fun formatUpdateVersion(versionName: String): String {
-        return if (versionName.startsWith("v", ignoreCase = true)) versionName else "v${versionName}"
     }
 
     /**
@@ -576,8 +388,5 @@ class PlanUsageInputActivity : AppCompatActivity() {
         private const val MENU_DELETE = 4
         private const val MOVE_OFFSET_UP = -1
         private const val MOVE_OFFSET_DOWN = 1
-        private const val UPDATE_PROGRESS_MAX = 100
-        private const val BYTES_PER_KILOBYTE = 1024L
-        private const val BYTES_PER_MEGABYTE = BYTES_PER_KILOBYTE * BYTES_PER_KILOBYTE
     }
 }

@@ -25,13 +25,8 @@ internal object PlanUsageCachePolicy {
     ): SavedPlanKey {
         return planKey.copy(
             lastUpdatedAt = checkedAt,
-            cachedStartAt = usage.startAt,
-            cachedEndAt = usage.endAt,
-            cachedDayWindowStartAt = usage.dayWindowStartAt,
-            cachedDayWindowEndAt = usage.dayWindowEndAt,
-            cachedWeekWindowStartAt = usage.weekWindowStartAt,
-            cachedWeekWindowEndAt = usage.weekWindowEndAt,
             cachedUsage = usage,
+            legacyPeriod = null,
             lastCheckedAt = checkedAt,
             queryStatus = PlanUsageQueryStatus.ACTIVE
         )

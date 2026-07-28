@@ -16,6 +16,33 @@ class PlanUsageRepositoryResponseTest {
     private val repository = PlanUsageRepository()
 
     @Test
+    fun availableBody_mapsThroughSharedSnapshotCodec() {
+        val result = repository.mapHttpResponse(
+            200,
+            """
+            {
+                "planName":"成长版",
+                "dailyLimitUsd":60,
+                "dailyUsedUsd":60.44455,
+                "dailyRemainingUsd":-0.44455,
+                "allowedModels":["gpt-test"],
+                "allowedGroups":["group-id"],
+                "groupNames":{"group-id":"Codex"},
+                "groupMultipliers":{"group-id":1}
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result is PlanUsageQueryResult.Available)
+        val usage = (result as PlanUsageQueryResult.Available).usage
+        assertEquals("成长版", usage.planName)
+        assertEquals(60.44455, usage.dailyUsedUsd ?: 0.0, 0.0)
+        assertEquals(-0.44455, usage.dailyRemainingUsd ?: 0.0, 0.0)
+        assertEquals(listOf("gpt-test"), usage.allowedModels)
+        assertEquals(1.0, usage.groupMultipliers["group-id"] ?: 0.0, 0.0)
+    }
+
+    @Test
     fun literalNullBody_mapsToExpired() {
         val result = repository.mapHttpResponse(200, "  null  ")
 

@@ -1,26 +1,30 @@
 package com.hss.myroutin.appearance
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
+import com.hss.myroutin.R
 
 /**
  * 说明：管理应用外观偏好，确保手动选择在重启后仍生效，并允许用户恢复跟随系统。
  *
+ * @param storageValue 写入 SharedPreferences 的稳定值，不随展示语言变化
+ * @param displayNameResId 当前外观模式对应的本地化名称资源
  * @作者 huangssh
  * @版本 2.2
  */
 enum class AppearanceMode(
     val storageValue: String,
-    val displayName: String
+    @StringRes val displayNameResId: Int
 ) {
     /** 不覆盖系统深浅色设置，作为新安装用户的默认模式。 */
-    FOLLOW_SYSTEM("follow_system", "跟随系统"),
+    FOLLOW_SYSTEM("follow_system", R.string.appearance_follow_system),
 
     /** 固定使用浅色界面，忽略系统的深色模式。 */
-    LIGHT("light", "浅色"),
+    LIGHT("light", R.string.appearance_light),
 
     /** 固定使用深色界面，忽略系统的浅色模式。 */
-    DARK("dark", "深色")
+    DARK("dark", R.string.appearance_dark)
 }
 
 /**

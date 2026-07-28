@@ -1,6 +1,7 @@
 package com.hss.myroutin.activity
 
 import android.view.View
+import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
 import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
 import com.hss.myroutin.viewmodel.PlanUsageUiState
@@ -23,12 +24,17 @@ internal class PlanUsagePageRenderer(
      * @param state 当前页面的完整渲染状态
      */
     fun render(state: PlanUsageUiState) {
+        val context = binding.root.context
         val isLocalDataReady = !state.isLoadingLocalData
-        binding.tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
+        binding.tvKeyCount.text = context.getString(R.string.plan_usage_key_count, state.planKeys.size)
         binding.tvRefreshStatus.text = when {
-            state.isRefreshingAll -> "刷新中 ${state.refreshCurrentIndex}/${state.refreshTotalCount}"
+            state.isRefreshingAll -> context.getString(
+                R.string.plan_usage_refresh_progress,
+                state.refreshCurrentIndex,
+                state.refreshTotalCount
+            )
             !state.refreshStatusText.isNullOrBlank() -> state.refreshStatusText
-            else -> ""
+            else -> null
         }
         binding.tvRefreshStatus.visibility = if (binding.tvRefreshStatus.text.isNullOrBlank()) {
             View.GONE
@@ -36,15 +42,21 @@ internal class PlanUsagePageRenderer(
             View.VISIBLE
         }
         binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll
-        binding.btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
+        binding.btnAddKey.text = context.getString(
+            if (state.isAddKeyPanelVisible) R.string.action_collapse else R.string.action_add_key
+        )
         binding.btnRefreshAll.isEnabled =
             isLocalDataReady &&
             state.planKeys.isNotEmpty() &&
             !state.isAddingKey &&
             !state.isRefreshingAll
-        binding.btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
+        binding.btnRefreshAll.text = context.getString(
+            if (state.isRefreshingAll) R.string.plan_usage_refreshing else R.string.action_refresh_all
+        )
         binding.btnQueryAndAdd.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
-        binding.btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
+        binding.btnQueryAndAdd.text = context.getString(
+            if (state.isAddingKey) R.string.plan_usage_querying else R.string.action_query_and_add
+        )
         binding.btnPasteKey.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
         binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
         binding.tvLocalDataWarning.text = state.localDataWarningMessage.orEmpty()

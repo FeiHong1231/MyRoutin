@@ -1,8 +1,10 @@
 package com.hss.myroutin.update
 
 import android.app.Application
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hss.myroutin.R
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -57,13 +59,13 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         val currentCardState = _uiState.value.cardState
         if (currentCardState is AppUpdateCardState.Downloading) {
             if (isManual) {
-                sendEvent(AppUpdateUiEvent.ShowToast("正在下载更新"))
+                sendEvent(AppUpdateUiEvent.ShowToast(getString(R.string.update_downloading_toast)))
             }
             return
         }
         if (currentCardState is AppUpdateCardState.Downloaded) {
             if (isManual) {
-                sendEvent(AppUpdateUiEvent.ShowToast("新版本已下载，可以立即安装"))
+                sendEvent(AppUpdateUiEvent.ShowToast(getString(R.string.update_downloaded_toast)))
             }
             return
         }
@@ -96,7 +98,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                         )
                     }
                     if (isManual) {
-                        sendEvent(AppUpdateUiEvent.ShowToast("已是最新版本"))
+                        sendEvent(AppUpdateUiEvent.ShowToast(getString(R.string.update_latest_toast)))
                     }
                 }
 
@@ -113,7 +115,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                 AppUpdateCheckResult.Failure -> {
                     updateUiState { it.copy(isChecking = false, isManualChecking = false) }
                     if (isManual) {
-                        sendEvent(AppUpdateUiEvent.ShowToast("检查更新失败，请检查网络后重试"))
+                        sendEvent(AppUpdateUiEvent.ShowToast(getString(R.string.update_check_failed_toast)))
                     }
                 }
             }
@@ -163,7 +165,12 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
 
                 is AppUpdateDownloadResult.Failure -> {
                     updateUiState {
-                        it.copy(cardState = AppUpdateCardState.DownloadFailed(update, result.userMessage))
+                        it.copy(
+                            cardState = AppUpdateCardState.DownloadFailed(
+                                update,
+                                resolveDownloadFailureMessage(result.reason)
+                            )
+                        )
                     }
                 }
 
@@ -260,6 +267,31 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
     /** 所有状态更新经由同一个入口，保证下载回调与检查结果不会覆盖彼此的新状态。 */
     private fun updateUiState(transform: (AppUpdateUiState) -> AppUpdateUiState) {
         _uiState.update(transform)
+    }
+
+    /**
+     * 将下载层稳定失败分类映射为本地化文案，卡片状态无需依赖异常类型。
+     * @param reason APK 下载失败原因
+     * @return 可直接展示在更新卡片中的文案
+     */
+    private fun resolveDownloadFailureMessage(reason: AppUpdateDownloadFailureReason): String {
+        val stringResId = when (reason) {
+            AppUpdateDownloadFailureReason.DIRECTORY_UNAVAILABLE -> R.string.update_failure_directory
+            AppUpdateDownloadFailureReason.INTEGRITY_CHECK_FAILED -> R.string.update_failure_integrity
+            AppUpdateDownloadFailureReason.TIMEOUT -> R.string.update_failure_timeout
+            AppUpdateDownloadFailureReason.NETWORK -> R.string.update_failure_network
+            AppUpdateDownloadFailureReason.UNKNOWN -> R.string.update_failure_unknown
+        }
+        return getString(stringResId)
+    }
+
+    /**
+     * 统一读取字符串资源，避免更新状态分支重复获取 Application。
+     * @param stringResId 字符串资源 ID
+     * @return 当前语言环境下的最终文案
+     */
+    private fun getString(@StringRes stringResId: Int): String {
+        return getApplication<Application>().getString(stringResId)
     }
 
     override fun onCleared() {

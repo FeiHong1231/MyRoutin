@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.hss.myroutin.R
 import java.io.File
 
 /**
@@ -52,7 +53,7 @@ object UpdateInstaller {
      */
     fun requestInstall(activity: Activity, apkFile: File): UpdateInstallResult {
         if (!apkFile.isFile) {
-            return UpdateInstallResult.Failure("安装包不存在，请重新下载")
+            return UpdateInstallResult.Failure(UpdateInstallFailureReason.MISSING_APK)
         }
         if (!canRequestPackageInstalls(activity)) {
             return UpdateInstallResult.PermissionRequired
@@ -66,15 +67,18 @@ object UpdateInstaller {
             activity.startActivity(
                 Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(apkUri, APK_MIME_TYPE)
-                    clipData = ClipData.newRawUri("MyRoutin 更新安装包", apkUri)
+                    clipData = ClipData.newRawUri(
+                        activity.getString(R.string.update_install_clip_label),
+                        apkUri
+                    )
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )
             UpdateInstallResult.Started
         } catch (exception: ActivityNotFoundException) {
-            UpdateInstallResult.Failure("无法打开系统安装页")
+            UpdateInstallResult.Failure(UpdateInstallFailureReason.INSTALLER_UNAVAILABLE)
         } catch (exception: IllegalArgumentException) {
-            UpdateInstallResult.Failure("安装包路径异常，请重新下载")
+            UpdateInstallResult.Failure(UpdateInstallFailureReason.INVALID_APK_PATH)
         }
     }
 
@@ -96,5 +100,20 @@ sealed interface UpdateInstallResult {
     object PermissionRequired : UpdateInstallResult
 
     /** 当前设备无法打开安装页或 APK 路径不可用。 */
-    data class Failure(val userMessage: String) : UpdateInstallResult
+    data class Failure(val reason: UpdateInstallFailureReason) : UpdateInstallResult
+}
+
+/**
+ * 说明：系统安装请求的稳定失败分类，Activity 负责映射为本地化提示。
+ *
+ * @作者 huangssh
+ * @版本 2.3
+ */
+enum class UpdateInstallFailureReason {
+    /** 已校验 APK 被系统或缓存清理流程移除。 */
+    MISSING_APK,
+    /** 当前设备没有可处理 APK 安装 Intent 的系统页面。 */
+    INSTALLER_UNAVAILABLE,
+    /** APK 不在 FileProvider 允许共享的受限目录。 */
+    INVALID_APK_PATH
 }

@@ -223,37 +223,16 @@ sealed interface PlanUsageQueryResult {
  * @版本 2.1
  */
 sealed interface PlanUsageQueryError {
+    object InvalidApiKey : PlanUsageQueryError
 
-    /** 页面使用该文案，不会显示异常栈、接口响应体或完整请求信息。 */
-    val userMessage: String
+    /** HTTP 状态码由 UI 边界映射为可本地化文案，Repository 只保留稳定诊断数据。 */
+    data class Http(val responseCode: Int) : PlanUsageQueryError
 
-    object InvalidApiKey : PlanUsageQueryError {
-        override val userMessage = "API Key 无效或已失效"
-    }
+    object NetworkTimeout : PlanUsageQueryError
 
-    data class Http(val responseCode: Int) : PlanUsageQueryError {
-        override val userMessage: String
-            get() = when (responseCode) {
-                HttpURLConnection.HTTP_FORBIDDEN -> "当前 Key 无访问权限（HTTP 403）"
-                429 -> "请求过于频繁，请稍后重试（HTTP 429）"
-                in 500..599 -> "服务暂时不可用，请稍后重试（HTTP $responseCode）"
-                else -> "请求失败（HTTP $responseCode）"
-            }
-    }
+    object NetworkUnavailable : PlanUsageQueryError
 
-    object NetworkTimeout : PlanUsageQueryError {
-        override val userMessage = "网络连接超时，请检查网络后重试"
-    }
+    object InvalidResponse : PlanUsageQueryError
 
-    object NetworkUnavailable : PlanUsageQueryError {
-        override val userMessage = "网络连接失败，请检查网络后重试"
-    }
-
-    object InvalidResponse : PlanUsageQueryError {
-        override val userMessage = "服务返回的数据格式异常，请稍后重试"
-    }
-
-    object Unknown : PlanUsageQueryError {
-        override val userMessage = "查询失败，请稍后重试"
-    }
+    object Unknown : PlanUsageQueryError
 }

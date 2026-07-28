@@ -9,9 +9,13 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/.name
 .DS_Store
 /build
 /captures
+/outputs/
+*.apk
+*.aab
 .externalNativeBuild
 .cxx
 

@@ -147,7 +147,7 @@ class ResumableApkDownloaderTest {
         val result = downloader.download(updateFor("complete".toByteArray())) {}
 
         assertEquals(
-            AppUpdateDownloadResult.Failure("下载失败，请检查网络后重试"),
+            AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.NETWORK),
             result
         )
         assertFalse(files.temporaryFile.exists())
@@ -166,7 +166,7 @@ class ResumableApkDownloaderTest {
         val result = downloader.download(updateFor(apkBytes)) {}
 
         assertEquals(
-            AppUpdateDownloadResult.Failure("下载失败，请检查网络后重试"),
+            AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.NETWORK),
             result
         )
         val files = fileStore.filesFor(VERSION_CODE)
@@ -185,7 +185,10 @@ class ResumableApkDownloaderTest {
 
         val result = unavailableDownloader.download(updateFor("complete".toByteArray())) {}
 
-        assertEquals(AppUpdateDownloadResult.Failure("无法创建更新文件目录"), result)
+        assertEquals(
+            AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.DIRECTORY_UNAVAILABLE),
+            result
+        )
         assertEquals(0, server.requestCount)
     }
 
@@ -198,7 +201,7 @@ class ResumableApkDownloaderTest {
         val result = downloader.download(update) {}
 
         assertEquals(
-            AppUpdateDownloadResult.Failure("安装包校验失败，请重试"),
+            AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.INTEGRITY_CHECK_FAILED),
             result
         )
         val files = fileStore.filesFor(VERSION_CODE)

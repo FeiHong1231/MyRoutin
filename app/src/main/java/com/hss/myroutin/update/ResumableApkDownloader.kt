@@ -45,7 +45,7 @@ internal class ResumableApkDownloader(
         val files = try {
             fileStore.prepare(update.versionCode)
         } catch (exception: UpdateDirectoryException) {
-            return AppUpdateDownloadResult.Failure("无法创建更新文件目录")
+            return AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.DIRECTORY_UNAVAILABLE)
         }
         var connection: HttpURLConnection? = null
         var downloadedBytes = files.temporaryFile.takeIf { it.isFile }?.length() ?: 0L
@@ -160,7 +160,7 @@ internal class ResumableApkDownloader(
             if (!coroutineContext.isActive) {
                 throw CancellationException()
             }
-            return AppUpdateDownloadResult.Failure(exception.toDownloadFailureMessage())
+            return AppUpdateDownloadResult.Failure(exception.toDownloadFailureReason())
         } finally {
             connection?.let { currentConnection ->
                 if (activeConnection === currentConnection) {
@@ -188,15 +188,15 @@ internal class ResumableApkDownloader(
     }
 
     /**
-     * 下载失败文案只描述用户可行动的结果，不暴露 URL、异常栈或服务端响应。
-     * @return 可直接展示的失败文案
+     * 下载异常只映射为稳定原因，不暴露 URL、异常栈或服务端响应。
+     * @return 供 UI 边界解析的失败分类
      */
-    private fun Throwable.toDownloadFailureMessage(): String {
+    private fun Throwable.toDownloadFailureReason(): AppUpdateDownloadFailureReason {
         return when (this) {
-            is UpdateIntegrityException -> "安装包校验失败，请重试"
-            is SocketTimeoutException -> "下载超时，请检查网络后重试"
-            is IOException -> "下载失败，请检查网络后重试"
-            else -> "下载失败，请稍后重试"
+            is UpdateIntegrityException -> AppUpdateDownloadFailureReason.INTEGRITY_CHECK_FAILED
+            is SocketTimeoutException -> AppUpdateDownloadFailureReason.TIMEOUT
+            is IOException -> AppUpdateDownloadFailureReason.NETWORK
+            else -> AppUpdateDownloadFailureReason.UNKNOWN
         }
     }
 

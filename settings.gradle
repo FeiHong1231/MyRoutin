@@ -7,10 +7,7 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
 
-        maven { url 'https://jitpack.io' }
-        maven { url "https://maven.google.com"}
         maven { url 'https://mirrors.cloud.tencent.com/gradle/' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/central' }
     }
 }
@@ -22,10 +19,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
 
-        maven { url 'https://jitpack.io' }
-        maven { url "https://maven.google.com"}
         maven { url 'https://mirrors.cloud.tencent.com/gradle/' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/central' }
     }
 }

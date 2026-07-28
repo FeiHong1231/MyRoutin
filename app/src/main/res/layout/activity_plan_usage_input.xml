@@ -27,7 +27,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="我的 Key（0）"
+                android:text="@string/plan_usage_key_count_empty"
                 android:textColor="@color/plan_usage_text_primary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
@@ -56,7 +56,7 @@
                 android:layout_height="46dp"
                 android:layout_marginEnd="6dp"
                 android:layout_weight="1"
-                android:text="添加 Key"
+                android:text="@string/action_add_key"
                 android:textAllCaps="false" />
 
             <Button
@@ -65,7 +65,7 @@
                 android:layout_height="46dp"
                 android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:text="刷新全部"
+                android:text="@string/action_refresh_all"
                 android:textAllCaps="false" />
         </LinearLayout>
 
@@ -102,7 +102,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="暂停下载"
+                    android:contentDescription="@string/update_pause_download"
                     android:padding="14dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_update_float_pause"
@@ -157,7 +157,7 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="关闭更新提示"
+                android:contentDescription="@string/update_close_prompt"
                 android:padding="14dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_update_float_close"
@@ -177,7 +177,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="添加订阅 Key"
+                android:text="@string/plan_usage_add_panel_title"
                 android:textColor="@color/plan_usage_text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -187,7 +187,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
                 android:layout_marginTop="10dp"
-                android:hint="名称（可选，例如主力 Key）"
+                android:hint="@string/plan_usage_key_name_hint"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
                 android:singleLine="true" />
@@ -197,7 +197,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
                 android:layout_marginTop="8dp"
-                android:hint="请输入 plan- 开头的 apikey"
+                android:hint="@string/plan_usage_api_key_hint"
                 android:inputType="textPassword"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
@@ -216,7 +216,7 @@
                     android:layout_height="46dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
-                    android:text="粘贴"
+                    android:text="@string/action_paste"
                     android:textAllCaps="false" />
 
                 <Button
@@ -225,7 +225,7 @@
                     android:layout_height="46dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="2"
-                    android:text="查询并添加"
+                    android:text="@string/action_query_and_add"
                     android:textAllCaps="false" />
             </LinearLayout>
         </LinearLayout>
@@ -247,7 +247,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:gravity="center"
-            android:text="添加 Key 后可集中查看各订阅的额度和到期时间"
+            android:text="@string/plan_usage_empty_hint"
             android:textColor="@color/plan_usage_text_secondary"
             android:textSize="13sp"
             tools:visibility="visible" />

@@ -7,7 +7,6 @@ import com.hss.myroutin.update.AppUpdateCardState
 import com.hss.myroutin.update.AppUpdateManifest
 import com.hss.myroutin.update.AppUpdateUiState
 import com.hss.myroutin.update.UpdateDownloadProgress
-import java.util.Locale
 
 /**
  * 说明：首页更新卡片渲染器，统一处理检查、下载、暂停、失败和已下载状态的控件展示。
@@ -37,9 +36,12 @@ internal class AppUpdateCardRenderer(
 
             is AppUpdateCardState.Available -> {
                 showActionCard(
-                    title = "发现新版本 ${formatVersion(cardState.update.versionName)}",
-                    detail = "已准备好下载",
-                    actionText = "下载更新"
+                    title = binding.root.context.getString(
+                        R.string.update_available_title,
+                        formatVersion(cardState.update.versionName)
+                    ),
+                    detail = binding.root.context.getString(R.string.update_ready_to_download),
+                    actionText = binding.root.context.getString(R.string.action_download_update)
                 )
             }
 
@@ -53,17 +55,20 @@ internal class AppUpdateCardRenderer(
 
             is AppUpdateCardState.DownloadFailed -> {
                 showActionCard(
-                    title = "下载失败",
+                    title = binding.root.context.getString(R.string.update_download_failed_title),
                     detail = cardState.userMessage,
-                    actionText = "重试"
+                    actionText = binding.root.context.getString(R.string.action_retry)
                 )
             }
 
             is AppUpdateCardState.Downloaded -> {
                 showActionCard(
-                    title = "新版本 ${formatVersion(cardState.update.versionName)} 已下载",
-                    detail = "安装包已完成校验",
-                    actionText = "立即安装"
+                    title = binding.root.context.getString(
+                        R.string.update_downloaded_title,
+                        formatVersion(cardState.update.versionName)
+                    ),
+                    detail = binding.root.context.getString(R.string.update_verified),
+                    actionText = binding.root.context.getString(R.string.action_install_now)
                 )
             }
         }
@@ -75,7 +80,11 @@ internal class AppUpdateCardRenderer(
      * @return 仅包含一个 v 前缀的展示版本号
      */
     fun formatVersion(versionName: String): String {
-        return if (versionName.startsWith("v", ignoreCase = true)) versionName else "v${versionName}"
+        return if (versionName.startsWith("v", ignoreCase = true)) {
+            versionName
+        } else {
+            binding.root.context.getString(R.string.update_version_prefixed, versionName)
+        }
     }
 
     /**
@@ -92,9 +101,21 @@ internal class AppUpdateCardRenderer(
         val downloadPercent = calculateDownloadPercent(progress)
         binding.llUpdateCard.visibility = View.VISIBLE
         binding.tvUpdateTitle.text = if (isPaused) {
-            "新版本 ${formatVersion(update.versionName)} 已暂停"
+            binding.root.context.getString(
+                R.string.update_paused_title,
+                formatVersion(update.versionName)
+            )
+        } else if (downloadPercent == null) {
+            binding.root.context.getString(
+                R.string.update_downloading_title,
+                formatVersion(update.versionName)
+            )
         } else {
-            "新版本 ${formatVersion(update.versionName)} 正在下载${downloadPercent?.let { " $it%" }.orEmpty()}"
+            binding.root.context.getString(
+                R.string.update_downloading_title_with_progress,
+                formatVersion(update.versionName),
+                downloadPercent
+            )
         }
         binding.tvUpdateDetail.text = formatDownloadProgress(progress)
         binding.flUpdateProgress.visibility = View.VISIBLE
@@ -103,8 +124,12 @@ internal class AppUpdateCardRenderer(
         binding.btnToggleUpdateDownload.setImageResource(
             if (isPaused) R.drawable.ic_update_float_play else R.drawable.ic_update_float_pause
         )
-        binding.btnToggleUpdateDownload.contentDescription = if (isPaused) "继续下载" else "暂停下载"
-        binding.btnDismissUpdate.contentDescription = if (isPaused) "关闭更新提示" else "取消下载"
+        binding.btnToggleUpdateDownload.contentDescription = binding.root.context.getString(
+            if (isPaused) R.string.update_continue_download else R.string.update_pause_download
+        )
+        binding.btnDismissUpdate.contentDescription = binding.root.context.getString(
+            if (isPaused) R.string.update_close_prompt else R.string.update_cancel_download
+        )
         binding.ucpUpdateProgress.isIndeterminate = false
         binding.ucpUpdateProgress.progress = downloadPercent ?: 0
     }
@@ -112,14 +137,15 @@ internal class AppUpdateCardRenderer(
     /** 手动检查时明确展示当前请求状态，避免用户只看到“正在处理”却不知道请求是否仍在进行。 */
     private fun showCheckingCard() {
         binding.llUpdateCard.visibility = View.VISIBLE
-        binding.tvUpdateTitle.text = "正在检查更新"
-        binding.tvUpdateDetail.text = "正在连接 GitHub Release"
+        binding.tvUpdateTitle.text = binding.root.context.getString(R.string.update_checking_title)
+        binding.tvUpdateDetail.text = binding.root.context.getString(R.string.update_checking_detail)
         binding.flUpdateProgress.visibility = View.VISIBLE
         binding.ucpUpdateProgress.progress = 0
         binding.ucpUpdateProgress.isIndeterminate = true
         binding.btnUpdateAction.visibility = View.GONE
         binding.btnToggleUpdateDownload.visibility = View.GONE
-        binding.btnDismissUpdate.contentDescription = "取消检查更新"
+        binding.btnDismissUpdate.contentDescription =
+            binding.root.context.getString(R.string.update_cancel_checking)
     }
 
     /**
@@ -137,7 +163,8 @@ internal class AppUpdateCardRenderer(
         binding.btnUpdateAction.visibility = View.VISIBLE
         binding.btnToggleUpdateDownload.visibility = View.GONE
         binding.btnUpdateAction.text = actionText
-        binding.btnDismissUpdate.contentDescription = "关闭更新提示"
+        binding.btnDismissUpdate.contentDescription =
+            binding.root.context.getString(R.string.update_close_prompt)
     }
 
     /**
@@ -147,9 +174,12 @@ internal class AppUpdateCardRenderer(
      */
     private fun formatDataSize(bytes: Long): String {
         return if (bytes < BYTES_PER_MEGABYTE) {
-            "${bytes / BYTES_PER_KILOBYTE} KB"
+            binding.root.context.getString(R.string.update_size_kb, bytes / BYTES_PER_KILOBYTE)
         } else {
-            String.format(Locale.getDefault(), "%.1f MB", bytes / BYTES_PER_MEGABYTE.toDouble())
+            binding.root.context.getString(
+                R.string.update_size_mb,
+                bytes / BYTES_PER_MEGABYTE.toDouble()
+            )
         }
     }
 
@@ -160,8 +190,15 @@ internal class AppUpdateCardRenderer(
      */
     private fun formatDownloadProgress(progress: UpdateDownloadProgress): String {
         return progress.totalBytes?.let { totalBytes ->
-            "${formatDataSize(progress.downloadedBytes)} / ${formatDataSize(totalBytes)}"
-        } ?: "${formatDataSize(progress.downloadedBytes)} 已下载"
+            binding.root.context.getString(
+                R.string.update_download_progress,
+                formatDataSize(progress.downloadedBytes),
+                formatDataSize(totalBytes)
+            )
+        } ?: binding.root.context.getString(
+            R.string.update_downloaded_size,
+            formatDataSize(progress.downloadedBytes)
+        )
     }
 
     /**

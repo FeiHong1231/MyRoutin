@@ -48,7 +48,9 @@ internal class PlanUsageKeyCardBinder(
         tvKeyName.text = planKey.name
         tvMaskedKey.text = PlanUsageFormatter.maskKey(planKey.apiKey)
         tvKeyRefreshing.visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
-        tvToggle.text = if (planKey.isExpanded) "收起" else "展开"
+        tvToggle.text = root.context.getString(
+            if (planKey.isExpanded) R.string.action_collapse else R.string.action_expand
+        )
         bindStatusMessage(tvStatusMessage, planKey, latestError)
         llKeyDetails.visibility = if (planKey.isExpanded) View.VISIBLE else View.GONE
         tvCollapsedHint.visibility = if (planKey.isExpanded) View.GONE else View.VISIBLE
@@ -67,52 +69,53 @@ internal class PlanUsageKeyCardBinder(
      */
     private fun bindPlanKeyDetails(cardBinding: ItemPlanUsageKeyBinding, planKey: SavedPlanKey) {
         resetPlanKeyDetailVisibility(cardBinding)
+        val context = cardBinding.root.context
         val usage = planKey.cachedUsage
         if (usage == null) {
             val legacyPeriod = planKey.legacyPeriod
             cardBinding.tvEmptyUsageHint.text = if (planKey.lastUpdatedAt == null) {
-                "暂无最后有效额度数据"
+                context.getString(R.string.plan_usage_no_last_snapshot)
             } else {
-                "当前暂无可展示的额度快照"
+                context.getString(R.string.plan_usage_no_snapshot)
             }
             cardBinding.tvEmptyUsageHint.visibility = View.VISIBLE
             cardBinding.llPrimaryDetails.visibility = View.VISIBLE
             val dayWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 legacyPeriod?.dayWindowStartAt,
                 legacyPeriod?.dayWindowEndAt,
-                FALLBACK_SHORT_CYCLE_LABEL
+                context.getString(R.string.plan_usage_short_cycle)
             )
             val weekWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 legacyPeriod?.weekWindowStartAt,
                 legacyPeriod?.weekWindowEndAt,
-                FALLBACK_WEEK_CYCLE_LABEL
+                context.getString(R.string.plan_usage_week_cycle)
             )
             bindDetailRow(
                 cardBinding.llDetailRowFirst,
                 cardBinding.tvDetailLabelFirst,
                 cardBinding.tvDetailValueFirst,
-                "开始时间",
+                context.getString(R.string.plan_usage_label_start_at),
                 PlanUsageFormatter.formatBeijingTime(legacyPeriod?.startAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowSecond,
                 cardBinding.tvDetailLabelSecond,
                 cardBinding.tvDetailValueSecond,
-                "到期时间",
+                context.getString(R.string.plan_usage_label_end_at),
                 PlanUsageFormatter.formatBeijingTime(legacyPeriod?.endAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowThird,
                 cardBinding.tvDetailLabelThird,
                 cardBinding.tvDetailValueThird,
-                "${dayWindowLabel}窗口结束",
+                context.getString(R.string.plan_usage_window_end, dayWindowLabel),
                 PlanUsageFormatter.formatBeijingTime(legacyPeriod?.dayWindowEndAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowFourth,
                 cardBinding.tvDetailLabelFourth,
                 cardBinding.tvDetailValueFourth,
-                "${weekWindowLabel}窗口结束",
+                context.getString(R.string.plan_usage_window_end, weekWindowLabel),
                 PlanUsageFormatter.formatBeijingTime(legacyPeriod?.weekWindowEndAt)
             )
             bindLastUpdatedRow(cardBinding, planKey)
@@ -124,28 +127,32 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.llDetailRowFirst,
             cardBinding.tvDetailLabelFirst,
             cardBinding.tvDetailValueFirst,
-            "套餐",
-            usage.planName ?: "--"
+            context.getString(R.string.plan_usage_label_plan),
+            usage.planName ?: context.getString(R.string.plan_usage_value_unavailable)
         )
         bindDetailRow(
             cardBinding.llDetailRowSecond,
             cardBinding.tvDetailLabelSecond,
             cardBinding.tvDetailValueSecond,
-            "类型/状态",
-            "${usage.type ?: "--"} / ${usage.status ?: "--"}"
+            context.getString(R.string.plan_usage_label_type_status),
+            context.getString(
+                R.string.plan_usage_type_status,
+                usage.type?.toString() ?: context.getString(R.string.plan_usage_value_unavailable),
+                usage.status?.toString() ?: context.getString(R.string.plan_usage_value_unavailable)
+            )
         )
         bindDetailRow(
             cardBinding.llDetailRowThird,
             cardBinding.tvDetailLabelThird,
             cardBinding.tvDetailValueThird,
-            "开始时间",
+            context.getString(R.string.plan_usage_label_start_at),
             PlanUsageFormatter.formatBeijingTime(usage.startAt)
         )
         bindDetailRow(
             cardBinding.llDetailRowFourth,
             cardBinding.tvDetailLabelFourth,
             cardBinding.tvDetailValueFourth,
-            "到期时间",
+            context.getString(R.string.plan_usage_label_end_at),
             PlanUsageFormatter.formatBeijingTime(usage.endAt)
         )
 
@@ -153,12 +160,12 @@ internal class PlanUsageKeyCardBinder(
             val dayWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 usage.dayWindowStartAt,
                 usage.dayWindowEndAt,
-                FALLBACK_SHORT_CYCLE_LABEL
+                context.getString(R.string.plan_usage_short_cycle)
             )
             val weekWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 usage.weekWindowStartAt,
                 usage.weekWindowEndAt,
-                FALLBACK_WEEK_CYCLE_LABEL
+                context.getString(R.string.plan_usage_week_cycle)
             )
             cardBinding.tvCycleTitle.visibility = View.VISIBLE
             bindUsageQuota(
@@ -168,7 +175,7 @@ internal class PlanUsageKeyCardBinder(
                 detailView = cardBinding.tvDayQuotaDetail,
                 percentView = cardBinding.tvDayQuotaPercent,
                 progressBar = cardBinding.pbDayQuotaProgress,
-                title = "${dayWindowLabel}额度",
+                title = context.getString(R.string.plan_usage_quota_title, dayWindowLabel),
                 usedUsd = usage.dailyUsedUsd,
                 limitUsd = usage.dailyLimitUsd,
                 remainingUsd = usage.dailyRemainingUsd
@@ -181,7 +188,7 @@ internal class PlanUsageKeyCardBinder(
                 detailView = cardBinding.tvWeekQuotaDetail,
                 percentView = cardBinding.tvWeekQuotaPercent,
                 progressBar = cardBinding.pbWeekQuotaProgress,
-                title = "${weekWindowLabel}额度",
+                title = context.getString(R.string.plan_usage_quota_title, weekWindowLabel),
                 usedUsd = usage.weeklyUsedUsd,
                 limitUsd = usage.weeklyLimitUsd,
                 remainingUsd = usage.weeklyRemainingUsd
@@ -191,14 +198,14 @@ internal class PlanUsageKeyCardBinder(
                 cardBinding.llCycleWindowEndFirst,
                 cardBinding.tvCycleWindowEndLabelFirst,
                 cardBinding.tvCycleWindowEndValueFirst,
-                "${dayWindowLabel}窗口结束",
+                context.getString(R.string.plan_usage_window_end, dayWindowLabel),
                 PlanUsageFormatter.formatBeijingTime(usage.dayWindowEndAt)
             )
             bindDetailRow(
                 cardBinding.llCycleWindowEndSecond,
                 cardBinding.tvCycleWindowEndLabelSecond,
                 cardBinding.tvCycleWindowEndValueSecond,
-                "${weekWindowLabel}窗口结束",
+                context.getString(R.string.plan_usage_window_end, weekWindowLabel),
                 PlanUsageFormatter.formatBeijingTime(usage.weekWindowEndAt)
             )
         }
@@ -214,14 +221,15 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.llAllowedModelsRow,
             cardBinding.tvAllowedModelsLabel,
             cardBinding.tvAllowedModelsValue,
-            "允许模型",
-            usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString() ?: "--"
+            context.getString(R.string.plan_usage_label_allowed_models),
+            usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString()
+                ?: context.getString(R.string.plan_usage_value_unavailable)
         )
         bindDetailRow(
             cardBinding.llGroupMultipliersRow,
             cardBinding.tvGroupMultipliersLabel,
             cardBinding.tvGroupMultipliersValue,
-            "分组倍率",
+            context.getString(R.string.plan_usage_label_group_multipliers),
             formatGroupMultipliers(cardBinding.root.context, usage)
         )
         bindLastUpdatedRow(cardBinding, planKey)
@@ -240,11 +248,11 @@ internal class PlanUsageKeyCardBinder(
     ) {
         val statusMessage = latestError?.let { error ->
             if (planKey.cachedUsage == null && planKey.legacyPeriod == null) {
-                "本次刷新失败：$error"
+                messageView.context.getString(R.string.plan_usage_refresh_failed, error)
             } else {
-                "本次刷新失败：$error，保留上次数据"
+                messageView.context.getString(R.string.plan_usage_refresh_failed_with_cache, error)
             }
-        } ?: resolveQueryStatusMessage(planKey)
+        } ?: resolveQueryStatusMessage(messageView.context, planKey)
         messageView.text = statusMessage.orEmpty()
         messageView.visibility = if (statusMessage == null) View.GONE else View.VISIBLE
         val colorResId = when {
@@ -256,25 +264,30 @@ internal class PlanUsageKeyCardBinder(
         messageView.setTextColor(messageView.context.getColor(colorResId))
     }
 
-    /** 将持久化查询状态转换为确定文案，并根据是否有历史快照避免承诺不存在的数据。 */
-    private fun resolveQueryStatusMessage(planKey: SavedPlanKey): String? {
+    /**
+     * 将持久化查询状态转换为确定文案，并根据是否有历史快照避免承诺不存在的数据。
+     * @param context 当前卡片用于读取本地化资源的上下文
+     * @param planKey 当前 Key、查询状态和历史数据
+     * @return 无需提示时为 null，否则返回对应状态文案
+     */
+    private fun resolveQueryStatusMessage(context: Context, planKey: SavedPlanKey): String? {
         val hasHistoricalData = planKey.cachedUsage != null || planKey.legacyPeriod != null
         return when (planKey.queryStatus) {
             PlanUsageQueryStatus.ACTIVE -> null
             PlanUsageQueryStatus.EXPIRED -> if (hasHistoricalData) {
-                "订阅已过期，当前展示最后有效数据"
+                context.getString(R.string.plan_usage_status_expired_with_cache)
             } else {
-                "订阅已过期，暂无历史用量数据"
+                context.getString(R.string.plan_usage_status_expired_without_cache)
             }
             PlanUsageQueryStatus.INVALID_API_KEY -> if (hasHistoricalData) {
-                "API Key 无效或已失效，当前展示最后有效数据"
+                context.getString(R.string.plan_usage_status_invalid_key_with_cache)
             } else {
-                "API Key 无效或已失效"
+                context.getString(R.string.plan_usage_status_invalid_key)
             }
             PlanUsageQueryStatus.UNKNOWN -> if (hasHistoricalData) {
-                "订阅状态待刷新，当前展示历史数据"
+                context.getString(R.string.plan_usage_status_unknown_with_cache)
             } else {
-                "订阅状态待刷新"
+                context.getString(R.string.plan_usage_status_unknown)
             }
         }
     }
@@ -337,11 +350,13 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.tvLastUpdatedLabel,
             cardBinding.tvLastUpdatedValue,
             when {
-                !hasHistoricalData -> "本次检查"
-                planKey.queryStatus == PlanUsageQueryStatus.ACTIVE -> "上次更新"
-                else -> "最后有效数据"
+                !hasHistoricalData -> cardBinding.root.context.getString(R.string.plan_usage_last_check)
+                planKey.queryStatus == PlanUsageQueryStatus.ACTIVE ->
+                    cardBinding.root.context.getString(R.string.plan_usage_last_update)
+                else -> cardBinding.root.context.getString(R.string.plan_usage_last_valid_data)
             },
-            timeMillis?.let { PlanUsageFormatter.formatLocalTime(it) } ?: "未查询"
+            timeMillis?.let { PlanUsageFormatter.formatLocalTime(it) }
+                ?: cardBinding.root.context.getString(R.string.plan_usage_not_queried)
         )
     }
 
@@ -379,11 +394,17 @@ internal class PlanUsageKeyCardBinder(
             if (quotaResult.isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
         )
         titleView.text = title
-        detailView.text =
-            "已用 ${PlanUsageFormatter.formatUsd(quotaResult.displayUsedUsd)} / " +
-                "${PlanUsageFormatter.formatUsd(limitUsd)}，剩余 ${PlanUsageFormatter.formatUsd(remainingUsd)}"
+        detailView.text = context.getString(
+            R.string.plan_usage_quota_detail,
+            PlanUsageFormatter.formatUsd(quotaResult.displayUsedUsd),
+            PlanUsageFormatter.formatUsd(limitUsd),
+            PlanUsageFormatter.formatUsd(remainingUsd)
+        )
         detailView.setTextColor(textColor)
-        percentView.text = "已用${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}"
+        percentView.text = context.getString(
+            R.string.plan_usage_used_percent,
+            PlanUsageFormatter.formatPercent(quotaResult.usedRate)
+        )
         percentView.setTextColor(textColor)
         updateProgressBar(progressBar, quotaResult.usedRate, quotaResult.isWarning)
         logCycleQuotaProgress(
@@ -408,13 +429,17 @@ internal class PlanUsageKeyCardBinder(
         val textColor = cardBinding.root.context.getColor(
             if (quotaResult.isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
         )
-        cardBinding.tvTokenQuotaDetail.text =
-            "已用 ${PlanUsageFormatter.formatToken(usage.consumedTokens)} / " +
-                "${PlanUsageFormatter.formatToken(quotaResult.totalTokens)}，" +
-                "剩余 ${PlanUsageFormatter.formatToken(usage.remainingTokens)}"
+        cardBinding.tvTokenQuotaDetail.text = cardBinding.root.context.getString(
+            R.string.plan_usage_quota_detail,
+            PlanUsageFormatter.formatToken(usage.consumedTokens),
+            PlanUsageFormatter.formatToken(quotaResult.totalTokens),
+            PlanUsageFormatter.formatToken(usage.remainingTokens)
+        )
         cardBinding.tvTokenQuotaDetail.setTextColor(textColor)
-        cardBinding.tvTokenQuotaPercent.text =
-            "已用${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}"
+        cardBinding.tvTokenQuotaPercent.text = cardBinding.root.context.getString(
+            R.string.plan_usage_used_percent,
+            PlanUsageFormatter.formatPercent(quotaResult.usedRate)
+        )
         cardBinding.tvTokenQuotaPercent.setTextColor(textColor)
         updateProgressBar(
             cardBinding.pbTokenQuotaProgress,
@@ -529,20 +554,23 @@ internal class PlanUsageKeyCardBinder(
             addAll(usage.groupNames.keys)
         }
         if (groupIds.isEmpty()) {
-            return "--"
+            return context.getString(R.string.plan_usage_value_unavailable)
         }
         val colorRanges = mutableListOf<Triple<Int, Int, Int>>()
         val textBuilder = StringBuilder()
         groupIds.forEachIndexed { index, groupId ->
             if (index > 0) {
-                textBuilder.append("，")
+                textBuilder.append(context.getString(R.string.plan_usage_list_separator))
             }
             val start = textBuilder.length
             val groupName = usage.groupNames[groupId] ?: groupId
             val multiplierValue = usage.groupMultipliers[groupId]
             val multiplier = multiplierValue?.let {
-                "x${PlanUsageFormatter.formatDecimal(it)}"
-            } ?: "x--"
+                context.getString(R.string.plan_usage_multiplier, PlanUsageFormatter.formatDecimal(it))
+            } ?: context.getString(
+                R.string.plan_usage_multiplier,
+                context.getString(R.string.plan_usage_value_unavailable)
+            )
             textBuilder.append("$groupName $multiplier")
             val end = textBuilder.length
             resolveGroupMultiplierColorResId(groupId, groupName, multiplierValue)?.let { colorResId ->
@@ -580,9 +608,6 @@ internal class PlanUsageKeyCardBinder(
     private companion object {
         /** ProgressBar 以 0.1% 为最小单位，避免 0.9% 等小用量被截断为零。 */
         private const val PROGRESS_MAX = 1_000
-        /** 服务端缺少周期起止时间时使用稳定名称，避免卡片标题为空。 */
-        private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"
-        private const val FALLBACK_WEEK_CYCLE_LABEL = "周"
         /** 额度绘制诊断统一使用该 Tag，便于在 Logcat 中单独过滤。 */
         private const val PLAN_USAGE_PROGRESS_LOG_TAG = "PlanUsageProgress"
     }

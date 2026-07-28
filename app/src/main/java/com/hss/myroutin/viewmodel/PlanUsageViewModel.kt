@@ -1,8 +1,10 @@
 package com.hss.myroutin.viewmodel
 
 import android.app.Application
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hss.myroutin.R
 import com.hss.myroutin.logic.PlanUsageCachePolicy
 import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.repository.PlanUsageQueryError
@@ -93,14 +95,14 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         if (apiKey.isBlank()) {
-            sendEvent(PlanUsageUiEvent.ShowToast("请输入 apikey"))
+            sendEvent(PlanUsageUiEvent.ShowToast(getString(R.string.plan_usage_input_api_key)))
             return
         }
         val duplicatedKey = savedPlanKeys.firstOrNull { it.apiKey == apiKey }
         if (duplicatedKey != null) {
             updateUiState { it.copy(isAddKeyPanelVisible = false) }
             sendEvent(PlanUsageUiEvent.HideKeyboard)
-            sendEvent(PlanUsageUiEvent.ShowToast("该 Key 已添加"))
+            sendEvent(PlanUsageUiEvent.ShowToast(getString(R.string.plan_usage_duplicate_key)))
             sendEvent(PlanUsageUiEvent.ScrollToPlanKey(duplicatedKey.id))
             return
         }
@@ -110,11 +112,17 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             val result = repository.queryPlanUsage(apiKey, ADD_KEY_REQUEST_TRACE)
             if (result is PlanUsageQueryResult.Failure) {
                 updateUiState { it.copy(isAddingKey = false) }
-                sendEvent(PlanUsageUiEvent.ShowToast("订阅查询失败：${result.error.userMessage}"))
+                sendEvent(
+                    PlanUsageUiEvent.ShowToast(
+                        getString(R.string.plan_usage_query_failed, resolveErrorMessage(result.error))
+                    )
+                )
                 return@launch
             }
             val now = System.currentTimeMillis()
-            val name = rawName.trim().ifBlank { "Key ${savedPlanKeys.size + 1}" }
+            val name = rawName.trim().ifBlank {
+                getString(R.string.plan_usage_default_key_name, savedPlanKeys.size + 1)
+            }
             val newPlanKey = SavedPlanKey(
                 id = UUID.randomUUID().toString(),
                 name = name,
@@ -145,8 +153,8 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             sendEvent(PlanUsageUiEvent.ClearAddKeyInputs)
             sendEvent(PlanUsageUiEvent.ScrollToPlanKey(addedKey.id))
             val addedMessage = when (result) {
-                is PlanUsageQueryResult.Available -> "已添加 $name"
-                PlanUsageQueryResult.Expired -> "已添加 $name，订阅已过期"
+                is PlanUsageQueryResult.Available -> getString(R.string.plan_usage_added, name)
+                PlanUsageQueryResult.Expired -> getString(R.string.plan_usage_added_expired, name)
                 is PlanUsageQueryResult.Failure -> return@launch
             }
             sendEvent(PlanUsageUiEvent.ShowToast(addedMessage))
@@ -205,7 +213,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             updateUiState {
                 it.copy(
                     isRefreshingAll = false,
-                    refreshStatusText = "已刷新 ${refreshQueue.size} 项"
+                    refreshStatusText = getString(R.string.plan_usage_refreshed_count, refreshQueue.size)
                 )
             }
         }
@@ -321,7 +329,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      */
     private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult): Boolean {
         if (result is PlanUsageQueryResult.Failure && result.error !is PlanUsageQueryError.InvalidApiKey) {
-            latestErrorByKeyId[keyId] = result.error.userMessage
+            latestErrorByKeyId[keyId] = resolveErrorMessage(result.error)
             return false
         }
         latestErrorByKeyId.remove(keyId)
@@ -359,7 +367,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
                     isLoadingLocalData = false,
                     isAddKeyPanelVisible = savedPlanKeys.isEmpty(),
                     localDataWarningMessage = when (keyLoadResult) {
-                        PlanUsageKeyLoadResult.Unreadable -> UNREADABLE_LOCAL_DATA_WARNING
+                        PlanUsageKeyLoadResult.Unreadable -> getString(R.string.plan_usage_unreadable_local_data)
                         else -> null
                     }
                 )
@@ -410,10 +418,39 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         eventChannel.trySend(event)
     }
 
+    /**
+     * 将稳定查询错误映射为本地化文案，网络层无需依赖 Android 资源或 Context。
+     * @param error Repository 返回的查询失败分类
+     * @return 可用于 Toast 或卡片状态的用户文案
+     */
+    private fun resolveErrorMessage(error: PlanUsageQueryError): String {
+        return when (error) {
+            PlanUsageQueryError.InvalidApiKey -> getString(R.string.plan_usage_status_invalid_key)
+            is PlanUsageQueryError.Http -> when (error.responseCode) {
+                403 -> getString(R.string.plan_usage_error_forbidden)
+                429 -> getString(R.string.plan_usage_error_rate_limited)
+                in 500..599 -> getString(R.string.plan_usage_error_service_unavailable, error.responseCode)
+                else -> getString(R.string.plan_usage_error_http, error.responseCode)
+            }
+            PlanUsageQueryError.NetworkTimeout -> getString(R.string.plan_usage_error_timeout)
+            PlanUsageQueryError.NetworkUnavailable -> getString(R.string.plan_usage_error_network)
+            PlanUsageQueryError.InvalidResponse -> getString(R.string.plan_usage_error_invalid_response)
+            PlanUsageQueryError.Unknown -> getString(R.string.plan_usage_error_unknown)
+        }
+    }
+
+    /**
+     * 统一读取带可选格式参数的字符串资源，避免 ViewModel 各处分散持有 Application 引用。
+     * @param stringResId 字符串资源 ID
+     * @param formatArgs 动态占位参数
+     * @return 当前语言环境下的最终文案
+     */
+    private fun getString(@StringRes stringResId: Int, vararg formatArgs: Any): String {
+        return getApplication<Application>().getString(stringResId, *formatArgs)
+    }
+
     private companion object {
         private const val ADD_KEY_REQUEST_TRACE = "[添加 Key]"
-        private const val UNREADABLE_LOCAL_DATA_WARNING =
-            "本机加密数据无法读取，可能来自其他设备或已失效。为保护 API Key，已忽略该数据；请重新添加 Key。"
     }
 }
 

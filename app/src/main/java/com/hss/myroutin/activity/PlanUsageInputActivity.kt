@@ -25,6 +25,7 @@ import com.hss.myroutin.update.AppUpdateCardState
 import com.hss.myroutin.update.AppUpdateManifest
 import com.hss.myroutin.update.AppUpdateUiEvent
 import com.hss.myroutin.update.AppUpdateViewModel
+import com.hss.myroutin.update.UpdateInstallFailureReason
 import com.hss.myroutin.update.UpdateInstallResult
 import com.hss.myroutin.update.UpdateInstaller
 import com.hss.myroutin.viewmodel.PlanUsageUiEvent
@@ -67,7 +68,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "订阅 Key 查询"
+        title = getString(R.string.plan_usage_page_title)
         binding = ActivityPlanUsageInputBinding.inflate(layoutInflater)
         setContentView(binding.root)
         initializePage()
@@ -128,9 +129,9 @@ class PlanUsageInputActivity : AppCompatActivity() {
         val appearanceModes = AppearanceMode.values()
         val selectedIndex = appearanceModes.indexOf(AppAppearancePreference.getSelectedMode(this))
         AlertDialog.Builder(this)
-            .setTitle("外观")
+            .setTitle(R.string.menu_appearance)
             .setSingleChoiceItems(
-                appearanceModes.map { it.displayName }.toTypedArray(),
+                appearanceModes.map { getString(it.displayNameResId) }.toTypedArray(),
                 selectedIndex
             ) { dialog, which ->
                 dialog.dismiss()
@@ -169,8 +170,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
             is PlanUsageUiEvent.ScrollToPlanKey -> scrollToPlanKey(event.keyId)
             PlanUsageUiEvent.HideKeyboard -> hideKeyboard()
             PlanUsageUiEvent.ClearAddKeyInputs -> {
-                binding.etKeyName.setText("")
-                binding.etApiKey.setText("")
+                binding.etKeyName.text?.clear()
+                binding.etApiKey.text?.clear()
             }
         }
     }
@@ -198,12 +199,12 @@ class PlanUsageInputActivity : AppCompatActivity() {
             ?.trim()
             .orEmpty()
         if (clipText.isBlank()) {
-            MyToastD.show("剪贴板为空")
+            MyToastD.show(getString(R.string.plan_usage_clipboard_empty))
             return
         }
         binding.etApiKey.setText(clipText)
         binding.etApiKey.setSelection(clipText.length)
-        MyToastD.show("已粘贴")
+        MyToastD.show(getString(R.string.plan_usage_pasted))
     }
 
     /** 根据当前更新卡片状态开始下载、重试下载，或打开系统安装页。 */
@@ -227,10 +228,15 @@ class PlanUsageInputActivity : AppCompatActivity() {
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("新版本 ${appUpdateCardRenderer.formatVersion(update.versionName)} 已下载")
-            .setMessage("安装包已完成校验，是否立即安装？")
-            .setNegativeButton("稍后", null)
-            .setPositiveButton("立即安装") { _, _ -> requestInstall(apkFile) }
+            .setTitle(
+                getString(
+                    R.string.update_downloaded_title,
+                    appUpdateCardRenderer.formatVersion(update.versionName)
+                )
+            )
+            .setMessage(R.string.update_install_prompt_message)
+            .setNegativeButton(R.string.update_install_later, null)
+            .setPositiveButton(R.string.action_install_now) { _, _ -> requestInstall(apkFile) }
             .show()
     }
 
@@ -242,19 +248,34 @@ class PlanUsageInputActivity : AppCompatActivity() {
         when (val result = UpdateInstaller.requestInstall(this, apkFile)) {
             UpdateInstallResult.Started -> Unit
             UpdateInstallResult.PermissionRequired -> showInstallPermissionDialog()
-            is UpdateInstallResult.Failure -> MyToastD.show(result.userMessage)
+            is UpdateInstallResult.Failure -> MyToastD.show(resolveInstallFailureMessage(result.reason))
         }
+    }
+
+    /**
+     * 将系统安装失败分类映射为页面提示，Installer 不直接持有用户界面文案。
+     * @param reason 系统安装请求的失败原因
+     * @return 可直接展示的本地化文案
+     */
+    private fun resolveInstallFailureMessage(reason: UpdateInstallFailureReason): String {
+        return getString(
+            when (reason) {
+                UpdateInstallFailureReason.MISSING_APK -> R.string.update_install_missing_apk
+                UpdateInstallFailureReason.INSTALLER_UNAVAILABLE -> R.string.update_install_open_failed
+                UpdateInstallFailureReason.INVALID_APK_PATH -> R.string.update_install_invalid_path
+            }
+        )
     }
 
     /** 用户只有在点击安装时才看到授权说明，避免在普通更新检查过程中打扰用户。 */
     private fun showInstallPermissionDialog() {
         AlertDialog.Builder(this)
-            .setTitle("需要安装授权")
-            .setMessage("首次安装更新，需要允许 MyRoutin 安装未知来源应用。授权后请返回此处再次点击“立即安装”。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("去授权") { _, _ ->
+            .setTitle(R.string.update_install_permission_title)
+            .setMessage(R.string.update_install_permission_message)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.update_go_to_permission) { _, _ ->
                 if (!UpdateInstaller.openInstallPermissionSettings(this)) {
-                    MyToastD.show("无法打开安装授权设置")
+                    MyToastD.show(getString(R.string.update_open_permission_failed))
                 }
             }
             .show()
@@ -306,15 +327,16 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private fun showPlanKeyMenu(anchor: View, planKey: SavedPlanKey) {
         val state = viewModel.uiState.value
         if (state.isRefreshingAll) {
-            MyToastD.show("正在刷新全部 Key")
+            MyToastD.show(getString(R.string.plan_usage_refresh_all_running))
             return
         }
         val currentPosition = state.planKeys.indexOfFirst { it.id == planKey.id }
         PopupMenu(this, anchor).apply {
-            menu.add(0, MENU_MOVE_UP, 0, "上移一位").isEnabled = currentPosition > 0
-            menu.add(0, MENU_MOVE_DOWN, 1, "下移一位").isEnabled = currentPosition in 0 until state.planKeys.lastIndex
-            menu.add(0, MENU_RENAME, 2, "重命名")
-            menu.add(0, MENU_DELETE, 3, "删除")
+            menu.add(0, MENU_MOVE_UP, 0, R.string.plan_usage_move_up).isEnabled = currentPosition > 0
+            menu.add(0, MENU_MOVE_DOWN, 1, R.string.plan_usage_move_down).isEnabled =
+                currentPosition in 0 until state.planKeys.lastIndex
+            menu.add(0, MENU_RENAME, 2, R.string.plan_usage_rename)
+            menu.add(0, MENU_DELETE, 3, R.string.action_delete)
             setOnMenuItemClickListener { menuItem ->
                 when (menuItem.itemId) {
                     MENU_MOVE_UP -> viewModel.movePlanKeyByOne(planKey.id, MOVE_OFFSET_UP)
@@ -333,16 +355,16 @@ class PlanUsageInputActivity : AppCompatActivity() {
         val dialogBinding = DialogRenamePlanKeyBinding.inflate(layoutInflater)
         dialogBinding.etPlanKeyName.setText(planKey.name)
         val dialog = AlertDialog.Builder(this)
-            .setTitle("重命名 Key")
+            .setTitle(R.string.plan_usage_rename_title)
             .setView(dialogBinding.root)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存", null)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.action_save, null)
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val newName = dialogBinding.etPlanKeyName.text?.toString()?.trim().orEmpty()
                 if (newName.isBlank()) {
-                    MyToastD.show("名称不能为空")
+                    MyToastD.show(getString(R.string.plan_usage_name_required))
                     return@setOnClickListener
                 }
                 viewModel.renamePlanKey(planKey.id, newName)
@@ -355,10 +377,10 @@ class PlanUsageInputActivity : AppCompatActivity() {
     /** 删除会移除本地 Key 与对应缓存，使用二次确认避免误操作后丢失查询配置。 */
     private fun showDeleteDialog(planKey: SavedPlanKey) {
         AlertDialog.Builder(this)
-            .setTitle("删除 ${planKey.name}")
-            .setMessage("删除后将移除此 Key 的本地缓存，是否继续？")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("删除") { _, _ ->
+            .setTitle(getString(R.string.plan_usage_delete_title, planKey.name))
+            .setMessage(R.string.plan_usage_delete_message)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.action_delete) { _, _ ->
                 viewModel.deletePlanKey(planKey.id)
             }
             .show()

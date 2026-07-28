@@ -164,6 +164,25 @@ sealed interface AppUpdateDownloadResult {
     /** 用户主动暂停时保留临时文件与真实进度，供 ViewModel 切换为继续下载入口。 */
     data class Paused(val progress: UpdateDownloadProgress) : AppUpdateDownloadResult
 
-    /** 可直接展示给用户的安全下载失败文案。 */
-    data class Failure(val userMessage: String) : AppUpdateDownloadResult
+    /** 下载失败只携带稳定原因，ViewModel 在 UI 边界映射为本地化文案。 */
+    data class Failure(val reason: AppUpdateDownloadFailureReason) : AppUpdateDownloadResult
+}
+
+/**
+ * 说明：APK 下载稳定失败分类，避免网络和文件层直接持有用户界面文案。
+ *
+ * @作者 huangssh
+ * @版本 2.3
+ */
+enum class AppUpdateDownloadFailureReason {
+    /** 应用缓存目录不可用，下载尚未发起。 */
+    DIRECTORY_UNAVAILABLE,
+    /** 下载完成但 APK 摘要与受信任清单不一致。 */
+    INTEGRITY_CHECK_FAILED,
+    /** 建连或读取响应超过当前超时限制。 */
+    TIMEOUT,
+    /** HTTP、连接或文件读写异常。 */
+    NETWORK,
+    /** 未归入上述类型的异常。 */
+    UNKNOWN
 }

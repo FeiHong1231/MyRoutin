@@ -10,6 +10,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import com.hss.myroutin.R
+import kotlin.math.roundToInt
 
 /**
  * 说明：系统 ProgressBar 的自适应前景 Drawable；极小进度保持完整圆角前景再裁剪，正常进度按填充宽度缩放渐变。
@@ -53,6 +54,14 @@ class QuotaProgressDrawable(
     override fun onLevelChange(level: Int): Boolean {
         invalidateSelf()
         return true
+    }
+
+    /**
+     * 替换到已有 ProgressBar 后显式同步等级，避免进度数值未变化时系统跳过 Drawable level 刷新。
+     * @param progressRate 已限制在 0 到 1 的当前进度比例
+     */
+    fun syncProgressRate(progressRate: Float) {
+        level = (progressRate.coerceIn(0f, 1f) * MAX_DRAWABLE_LEVEL).roundToInt()
     }
 
     /**

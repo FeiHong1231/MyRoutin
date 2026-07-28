@@ -4,7 +4,7 @@ package com.hss.myroutin.model
  * 说明：本地保存的订阅 Key 条目，承载列表排序、卡片展开状态和最近一次成功查询结果。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 data class SavedPlanKey(
     val id: String,
@@ -13,6 +13,7 @@ data class SavedPlanKey(
     val isExpanded: Boolean = true,
     val createdAt: Long,
     val sortOrder: Int = 0,
+    /** 最近一次拿到有效额度快照的时间，过期或 Key 失效结果不得覆盖该时间。 */
     val lastUpdatedAt: Long? = null,
     val cachedStartAt: String? = null,
     val cachedEndAt: String? = null,
@@ -20,8 +21,30 @@ data class SavedPlanKey(
     val cachedDayWindowEndAt: String? = null,
     val cachedWeekWindowStartAt: String? = null,
     val cachedWeekWindowEndAt: String? = null,
-    val cachedUsage: PlanUsageSnapshot? = null
+    /** 最近一次非空额度快照；订阅过期或 Key 失效时保留，用于继续展示最后有效数据。 */
+    val cachedUsage: PlanUsageSnapshot? = null,
+    /** 最近一次得到确定业务结果的时间，包含有效快照、订阅过期和 Key 失效。 */
+    val lastCheckedAt: Long? = lastUpdatedAt,
+    /** 最新一次确定的查询状态，与最后有效额度快照分开保存。 */
+    val queryStatus: PlanUsageQueryStatus = if (cachedUsage == null) {
+        PlanUsageQueryStatus.UNKNOWN
+    } else {
+        PlanUsageQueryStatus.ACTIVE
+    }
 )
+
+/**
+ * 说明：订阅 Key 最新一次确定的查询状态；额度是否耗尽由当前快照单独计算，不再混入订阅状态。
+ *
+ * @作者 huangssh
+ * @版本 2.3
+ */
+enum class PlanUsageQueryStatus {
+    ACTIVE,
+    EXPIRED,
+    INVALID_API_KEY,
+    UNKNOWN
+}
 
 /**
  * 说明：订阅用量页面需要长期缓存的展示数据，避免接口暂时失败时清空已有卡片内容。

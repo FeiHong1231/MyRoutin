@@ -2,6 +2,7 @@ package com.hss.myroutin.store
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.hss.myroutin.model.PlanUsageQueryStatus
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
 import org.json.JSONArray
@@ -29,7 +30,7 @@ sealed interface PlanUsageKeyLoadResult {
  * 说明：订阅 Key 列表的本机加密存储入口，负责将全部 Key 与页面缓存作为同一份密文持久化。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.3
  */
 class PlanUsageKeyStore(context: Context) {
 
@@ -103,6 +104,8 @@ class PlanUsageKeyStore(context: Context) {
                     putNullable("cachedWeekWindowStartAt", key.cachedWeekWindowStartAt)
                     putNullable("cachedWeekWindowEndAt", key.cachedWeekWindowEndAt)
                     putNullable("cachedUsage", key.cachedUsage?.toJsonObject())
+                    putNullable("lastCheckedAt", key.lastCheckedAt)
+                    put("queryStatus", key.queryStatus.name)
                 })
             }
         }.toString()
@@ -121,22 +124,27 @@ class PlanUsageKeyStore(context: Context) {
             DecodedPlanKey(
                 key = key,
                 legacyIsPinned = jsonObject.optBoolean("isPinned", false),
-                originalIndex = index
+                originalIndex = index,
+                requiresQueryStatusMigration = !jsonObject.has("queryStatus")
             )
         }
-        return if (decodedKeys.any { it.key.sortOrder == MISSING_SORT_ORDER }) {
-            val migratedKeys = decodedKeys.sortedWith(
+        val requiresSortOrderMigration = decodedKeys.any { it.key.sortOrder == MISSING_SORT_ORDER }
+        val keys = if (requiresSortOrderMigration) {
+            decodedKeys.sortedWith(
                 compareByDescending<DecodedPlanKey> { it.legacyIsPinned }
                     .thenBy { it.key.createdAt }
                     .thenBy { it.originalIndex }
             ).mapIndexed { sortOrder, decodedKey ->
                 decodedKey.key.copy(sortOrder = sortOrder)
             }
-            saveKeys(migratedKeys)
-            migratedKeys
         } else {
             decodedKeys.map { it.key }
         }
+        if (requiresSortOrderMigration || decodedKeys.any { it.requiresQueryStatusMigration }) {
+            // 读取成功后立即用新字段回写，旧额度推断状态不会在后续启动中反复迁移。
+            saveKeys(keys)
+        }
+        return keys
     }
 
     /**
@@ -145,6 +153,13 @@ class PlanUsageKeyStore(context: Context) {
     private fun JSONObject.toSavedPlanKey(): SavedPlanKey? {
         val id = stringOrNull("id") ?: return null
         val apiKey = stringOrNull("apiKey") ?: return null
+        val lastUpdatedAt = longOrNull("lastUpdatedAt")
+        val cachedUsage = optJSONObject("cachedUsage")?.toPlanUsageSnapshot()
+        val queryStatus = resolveStoredPlanUsageQueryStatus(
+            currentStatus = stringOrNull("queryStatus"),
+            legacyAvailability = stringOrNull("availability"),
+            hasCachedUsage = cachedUsage != null
+        )
         return SavedPlanKey(
             id = id,
             name = stringOrNull("name") ?: DEFAULT_KEY_NAME,
@@ -152,14 +167,17 @@ class PlanUsageKeyStore(context: Context) {
             isExpanded = optBoolean("isExpanded", true),
             createdAt = optLong("createdAt", 0L),
             sortOrder = optInt("sortOrder", MISSING_SORT_ORDER),
-            lastUpdatedAt = longOrNull("lastUpdatedAt"),
+            lastUpdatedAt = lastUpdatedAt,
             cachedStartAt = stringOrNull("cachedStartAt"),
             cachedEndAt = stringOrNull("cachedEndAt"),
             cachedDayWindowStartAt = stringOrNull("cachedDayWindowStartAt"),
             cachedDayWindowEndAt = stringOrNull("cachedDayWindowEndAt"),
             cachedWeekWindowStartAt = stringOrNull("cachedWeekWindowStartAt"),
             cachedWeekWindowEndAt = stringOrNull("cachedWeekWindowEndAt"),
-            cachedUsage = optJSONObject("cachedUsage")?.toPlanUsageSnapshot()
+            cachedUsage = cachedUsage,
+            // 旧缓存没有检查时间时沿用原更新时间，保证升级后仍能说明数据新旧。
+            lastCheckedAt = longOrNull("lastCheckedAt") ?: lastUpdatedAt,
+            queryStatus = queryStatus
         )
     }
 
@@ -270,7 +288,9 @@ class PlanUsageKeyStore(context: Context) {
     private data class DecodedPlanKey(
         val key: SavedPlanKey,
         val legacyIsPinned: Boolean,
-        val originalIndex: Int
+        val originalIndex: Int,
+        /** 缺少新状态字段时需要在本次成功解密后立即回写。 */
+        val requiresQueryStatusMigration: Boolean
     )
 
     private companion object {
@@ -282,5 +302,28 @@ class PlanUsageKeyStore(context: Context) {
         private const val PREF_KEY_WEEK_WINDOW_END_AT = "week_window_end_at"
         private const val DEFAULT_KEY_NAME = "默认 Key"
         private const val MISSING_SORT_ORDER = -1
+    }
+}
+
+/**
+ * 将当前或旧版持久化字段转换为新查询状态；旧额度推断结果统一待刷新，禁止误迁移为过期。
+ * @param currentStatus 2.3 新契约写入的查询状态
+ * @param legacyAvailability 旧版本写入的可用状态
+ * @param hasCachedUsage 是否仍保留最后有效用量快照
+ */
+internal fun resolveStoredPlanUsageQueryStatus(
+    currentStatus: String?,
+    legacyAvailability: String?,
+    hasCachedUsage: Boolean
+): PlanUsageQueryStatus {
+    if (currentStatus != null) {
+        return PlanUsageQueryStatus.values().firstOrNull { it.name == currentStatus }
+            ?: PlanUsageQueryStatus.UNKNOWN
+    }
+    return when (legacyAvailability) {
+        "AVAILABLE" -> PlanUsageQueryStatus.ACTIVE
+        "EXPIRED" -> PlanUsageQueryStatus.EXPIRED
+        null -> if (hasCachedUsage) PlanUsageQueryStatus.ACTIVE else PlanUsageQueryStatus.UNKNOWN
+        else -> PlanUsageQueryStatus.UNKNOWN
     }
 }

@@ -2,6 +2,7 @@ package com.hss.myroutin.repository
 
 import android.util.Log
 import com.hss.myroutin.BuildConfig
+import com.hss.myroutin.logic.PlanUsageFormatter
 import com.hss.myroutin.model.PlanUsageSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -18,7 +19,7 @@ import java.io.IOException
  * 说明：订阅额度接口的数据入口，负责在 IO 线程完成鉴权请求、响应校验和 JSON 到领域模型的映射。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 class PlanUsageRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -34,7 +35,8 @@ class PlanUsageRepository(
         return withContext(ioDispatcher) {
             val requestStartedAt = System.currentTimeMillis()
             logDebug {
-                "$requestTrace 请求：GET $endpoint，Authorization=Bearer ${maskKey(apiKey)}，Accept=application/json"
+                "$requestTrace 请求：GET $endpoint，" +
+                    "Authorization=Bearer ${PlanUsageFormatter.maskKey(apiKey)}，Accept=application/json"
             }
             try {
                 val result = requestUsage(apiKey, requestTrace)
@@ -91,20 +93,33 @@ class PlanUsageRepository(
                 connection.errorStream
             })?.bufferedReader()?.use { it.readText() }.orEmpty()
             logDebugResponse(requestTrace, responseCode, connection.headerFields, responseText)
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-                return PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidApiKey)
-            }
-            if (responseCode !in 200..299) {
-                return PlanUsageQueryResult.Failure(PlanUsageQueryError.Http(responseCode))
-            }
-            val body = responseText.trim()
-            if (body.isEmpty() || body == "null") {
-                return PlanUsageQueryResult.Success(null)
-            }
-            return PlanUsageQueryResult.Success(parseUsage(JSONObject(body)))
+            return mapHttpResponse(responseCode, responseText)
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * 按服务端契约映射 HTTP 响应；只有字面量 `null` 表示订阅过期，空正文属于格式异常。
+     * @param responseCode HTTP 响应状态码
+     * @param responseText 服务端原始响应正文
+     */
+    internal fun mapHttpResponse(responseCode: Int, responseText: String): PlanUsageQueryResult {
+        if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            // 当前接口约定 401 携带 invalid_api_key；以状态码为稳定主判据，避免依赖服务端文案。
+            return PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidApiKey)
+        }
+        if (responseCode !in 200..299) {
+            return PlanUsageQueryResult.Failure(PlanUsageQueryError.Http(responseCode))
+        }
+        val body = responseText.trim()
+        if (body == "null") {
+            return PlanUsageQueryResult.Expired
+        }
+        if (body.isEmpty()) {
+            return PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidResponse)
+        }
+        return PlanUsageQueryResult.Available(parseUsage(JSONObject(body)))
     }
 
     /**
@@ -247,19 +262,11 @@ class PlanUsageRepository(
         return result
     }
 
-    /** 仅用于 Debug 日志，避免将完整长期凭证写入 Logcat。 */
-    private fun maskKey(apiKey: String): String {
-        return if (apiKey.length <= MASK_KEY_SHORT_LENGTH) {
-            "${apiKey.take(4)}****"
-        } else {
-            "${apiKey.take(9)}****${apiKey.takeLast(6)}"
-        }
-    }
-
     /** 将强类型结果压缩为仅供 Debug 日志使用的描述，Release 包不会输出该内容。 */
     private fun PlanUsageQueryResult.debugDescription(): String {
         return when (this) {
-            is PlanUsageQueryResult.Success -> if (usage == null) "空订阅" else "成功"
+            is PlanUsageQueryResult.Available -> "有效订阅"
+            PlanUsageQueryResult.Expired -> "订阅过期"
             is PlanUsageQueryResult.Failure -> "失败：${error.javaClass.simpleName}"
         }
     }
@@ -270,20 +277,22 @@ class PlanUsageRepository(
         private const val USAGE_ENDPOINT = "https://api.routin.ai/plan/v1/usage"
         private const val CONNECT_TIMEOUT_MILLIS = 10_000
         private const val READ_TIMEOUT_MILLIS = 10_000
-        private const val MASK_KEY_SHORT_LENGTH = 15
     }
 }
 
 /**
- * 说明：单 Key 查询的强类型结果，成功空订阅与请求失败在类型层面明确区分。
+ * 说明：单 Key 查询结果严格区分有效订阅、订阅过期和请求失败，调用方不再解释可空快照。
  *
  * @作者 huangssh
- * @版本 2.1
+ * @版本 2.3
  */
 sealed interface PlanUsageQueryResult {
 
-    /** 请求成功，usage 为 null 时表示该 Key 当前没有可展示订阅。 */
-    data class Success(val usage: PlanUsageSnapshot?) : PlanUsageQueryResult
+    /** 当前存在可用订阅，携带服务端最新用量快照。 */
+    data class Available(val usage: PlanUsageSnapshot) : PlanUsageQueryResult
+
+    /** 接口成功返回 `null`，按当前契约表示该 Key 的订阅已经过期。 */
+    object Expired : PlanUsageQueryResult
 
     /** 请求未成功，错误类型只携带安全的展示语义，不暴露底层异常或服务端原文。 */
     data class Failure(val error: PlanUsageQueryError) : PlanUsageQueryResult

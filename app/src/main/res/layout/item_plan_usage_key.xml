@@ -103,14 +103,14 @@
     </LinearLayout>
 
     <TextView
-        android:id="@+id/tvRefreshError"
+        android:id="@+id/tvStatusMessage"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:textColor="@color/plan_usage_warning"
         android:textSize="13sp"
         android:visibility="gone"
-        tools:text="本次刷新失败：HTTP 500，保留上次数据"
+        tools:text="订阅已过期，当前展示最后有效数据"
         tools:visibility="visible" />
 
     <TextView
@@ -302,8 +302,7 @@
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
                 android:indeterminate="false"
-                android:max="1000"
-                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
+                android:max="1000" />
         </LinearLayout>
 
         <LinearLayout
@@ -354,8 +353,7 @@
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
                 android:indeterminate="false"
-                android:max="1000"
-                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
+                android:max="1000" />
         </LinearLayout>
 
         <LinearLayout
@@ -459,8 +457,7 @@
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
                 android:indeterminate="false"
-                android:max="1000"
-                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
+                android:max="1000" />
         </LinearLayout>
 
         <TextView

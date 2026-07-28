@@ -3,7 +3,9 @@ package com.hss.myroutin.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hss.myroutin.logic.PlanUsageCachePolicy
 import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.repository.PlanUsageQueryError
 import com.hss.myroutin.repository.PlanUsageQueryResult
 import com.hss.myroutin.repository.PlanUsageRepository
 import com.hss.myroutin.store.PlanUsageKeyStore
@@ -27,7 +29,7 @@ import java.util.UUID
  * 说明：订阅额度页的业务状态入口，集中管理 Key、刷新任务、持久化和一次性页面事件。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 class PlanUsageViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -105,31 +107,30 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         updateUiState { it.copy(isAddingKey = true) }
         sendEvent(PlanUsageUiEvent.HideKeyboard)
         viewModelScope.launch {
-            val usage = when (val result = repository.queryPlanUsage(apiKey, ADD_KEY_REQUEST_TRACE)) {
-                is PlanUsageQueryResult.Failure -> {
-                    updateUiState { it.copy(isAddingKey = false) }
-                    sendEvent(PlanUsageUiEvent.ShowToast("订阅查询失败：${result.error.userMessage}"))
-                    return@launch
-                }
-                is PlanUsageQueryResult.Success -> result.usage
+            val result = repository.queryPlanUsage(apiKey, ADD_KEY_REQUEST_TRACE)
+            if (result is PlanUsageQueryResult.Failure) {
+                updateUiState { it.copy(isAddingKey = false) }
+                sendEvent(PlanUsageUiEvent.ShowToast("订阅查询失败：${result.error.userMessage}"))
+                return@launch
             }
             val now = System.currentTimeMillis()
             val name = rawName.trim().ifBlank { "Key ${savedPlanKeys.size + 1}" }
-            val addedKey = SavedPlanKey(
+            val newPlanKey = SavedPlanKey(
                 id = UUID.randomUUID().toString(),
                 name = name,
                 apiKey = apiKey,
                 createdAt = now,
-                sortOrder = nextPlanKeySortOrder(),
-                lastUpdatedAt = now,
-                cachedStartAt = usage?.startAt,
-                cachedEndAt = usage?.endAt,
-                cachedDayWindowStartAt = usage?.dayWindowStartAt,
-                cachedDayWindowEndAt = usage?.dayWindowEndAt,
-                cachedWeekWindowStartAt = usage?.weekWindowStartAt,
-                cachedWeekWindowEndAt = usage?.weekWindowEndAt,
-                cachedUsage = usage
+                sortOrder = nextPlanKeySortOrder()
             )
+            val addedKey = when (result) {
+                is PlanUsageQueryResult.Available -> PlanUsageCachePolicy.applyAvailableUsage(
+                    planKey = newPlanKey,
+                    usage = result.usage,
+                    checkedAt = now
+                )
+                PlanUsageQueryResult.Expired -> PlanUsageCachePolicy.applyExpired(newPlanKey, now)
+                is PlanUsageQueryResult.Failure -> return@launch
+            }
             savedPlanKeys.add(addedKey)
             schedulePlanKeysPersistence()
             publishPlanKeys { current ->
@@ -143,7 +144,12 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             }
             sendEvent(PlanUsageUiEvent.ClearAddKeyInputs)
             sendEvent(PlanUsageUiEvent.ScrollToPlanKey(addedKey.id))
-            sendEvent(PlanUsageUiEvent.ShowToast("已添加 $name"))
+            val addedMessage = when (result) {
+                is PlanUsageQueryResult.Available -> "已添加 $name"
+                PlanUsageQueryResult.Expired -> "已添加 $name，订阅已过期"
+                is PlanUsageQueryResult.Failure -> return@launch
+            }
+            sendEvent(PlanUsageUiEvent.ShowToast(addedMessage))
         }
     }
 
@@ -173,7 +179,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         }
         sendEvent(PlanUsageUiEvent.HideKeyboard)
         viewModelScope.launch {
-            // 仅成功结果会改变持久数据，失败提示仍只保留在当前页面会话。
+            // 有效快照、过期和 401 都是确定结果；其他失败提示仍只保留在当前页面会话。
             var hasPersistentChanges = false
             try {
                 refreshQueue.forEachIndexed { index, planKey ->
@@ -308,18 +314,15 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * 成功刷新才覆盖缓存，失败时保留旧额度并记录本次页面会话内的错误提示。
+     * 应用有效快照、过期或 Key 失效结果；临时请求失败不修改持久状态和历史额度。
      * @param keyId 本次请求对应的 Key ID
      * @param result Repository 返回的查询结果
      * @return 是否产生了需要写入本机缓存的数据变化
      */
     private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult): Boolean {
-        val usage = when (result) {
-            is PlanUsageQueryResult.Failure -> {
-                latestErrorByKeyId[keyId] = result.error.userMessage
-                return false
-            }
-            is PlanUsageQueryResult.Success -> result.usage
+        if (result is PlanUsageQueryResult.Failure && result.error !is PlanUsageQueryError.InvalidApiKey) {
+            latestErrorByKeyId[keyId] = result.error.userMessage
+            return false
         }
         latestErrorByKeyId.remove(keyId)
         val index = savedPlanKeys.indexOfFirst { it.id == keyId }
@@ -327,16 +330,16 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             return false
         }
         val planKey = savedPlanKeys[index]
-        savedPlanKeys[index] = planKey.copy(
-            lastUpdatedAt = System.currentTimeMillis(),
-            cachedStartAt = usage?.startAt ?: planKey.cachedStartAt,
-            cachedEndAt = usage?.endAt ?: planKey.cachedEndAt,
-            cachedDayWindowStartAt = usage?.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
-            cachedDayWindowEndAt = usage?.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
-            cachedWeekWindowStartAt = usage?.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
-            cachedWeekWindowEndAt = usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
-            cachedUsage = usage
-        )
+        val checkedAt = System.currentTimeMillis()
+        savedPlanKeys[index] = when (result) {
+            is PlanUsageQueryResult.Available -> PlanUsageCachePolicy.applyAvailableUsage(
+                planKey = planKey,
+                usage = result.usage,
+                checkedAt = checkedAt
+            )
+            PlanUsageQueryResult.Expired -> PlanUsageCachePolicy.applyExpired(planKey, checkedAt)
+            is PlanUsageQueryResult.Failure -> PlanUsageCachePolicy.applyInvalidApiKey(planKey, checkedAt)
+        }
         return true
     }
 

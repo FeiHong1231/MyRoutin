@@ -14,7 +14,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.recyclerview.widget.LinearLayoutManager
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
 import com.hss.myroutin.appearance.AppAppearancePreference
@@ -110,11 +109,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
             onTogglePlanKey = viewModel::togglePlanKeyExpansion,
             onManagePlanKey = ::showPlanKeyMenu
         )
-        binding.rvPlanKeys.apply {
-            layoutManager = LinearLayoutManager(this@PlanUsageInputActivity)
-            adapter = planUsageKeyAdapter
-            isNestedScrollingEnabled = true
-        }
+        binding.rvPlanKeys.adapter = planUsageKeyAdapter
         binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
         binding.btnRefreshAll.setOnClickListener { refreshAllPlanKeys() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }

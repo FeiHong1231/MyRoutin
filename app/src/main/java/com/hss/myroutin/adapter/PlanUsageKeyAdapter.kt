@@ -4,6 +4,7 @@ import android.content.Context
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,17 +13,15 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.R
 import com.hss.myroutin.databinding.ItemPlanUsageKeyBinding
+import com.hss.myroutin.logic.PlanUsageFormatter
+import com.hss.myroutin.logic.PlanUsageQuotaCalculator
+import com.hss.myroutin.model.PlanUsageQueryStatus
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.widget.QuotaProgressDrawable
-import java.text.DateFormat
-import java.text.DecimalFormat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import kotlin.math.roundToInt
 
 /**
@@ -37,15 +36,6 @@ class PlanUsageKeyAdapter(
 ) : ListAdapter<PlanUsageKeyAdapter.KeyCardItem, PlanUsageKeyAdapter.PlanUsageKeyViewHolder>(
     KEY_CARD_ITEM_DIFF_CALLBACK
 ) {
-
-    /** 卡片金额、百分比和 token 均使用稳定格式，避免列表滚动时产生不同展示精度。 */
-    private val usdFormatter = DecimalFormat("0.##")
-    private val percentFormatter = DecimalFormat("0.#")
-    private val tokenFormatter = DecimalFormat("#,###")
-
-    init {
-        setHasStableIds(true)
-    }
 
     /**
      * 使用当前排序后的 Key 列表更新卡片，刷新态只在本次页面会话内生效。
@@ -81,8 +71,6 @@ class PlanUsageKeyAdapter(
         bindPlanKeyCard(holder.binding, item.key, item.isRefreshing, item.latestError)
     }
 
-    override fun getItemId(position: Int): Long = getItem(position).key.id.hashCode().toLong()
-
     /**
      * 为复用的 XML 卡片写入当前 Key 数据，所有可变区块只切换已有节点的内容和可见性。
      * @param cardBinding 当前 ViewHolder 对应的卡片 Binding
@@ -97,11 +85,10 @@ class PlanUsageKeyAdapter(
         latestError: String?
     ) = with(cardBinding) {
         tvKeyName.text = planKey.name
-        tvMaskedKey.text = maskKey(planKey.apiKey)
+        tvMaskedKey.text = PlanUsageFormatter.maskKey(planKey.apiKey)
         tvKeyRefreshing.visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
         tvToggle.text = if (planKey.isExpanded) "收起" else "展开"
-        tvRefreshError.text = latestError?.let { "本次刷新失败：$it，保留上次数据" }.orEmpty()
-        tvRefreshError.visibility = if (latestError == null) View.GONE else View.VISIBLE
+        bindStatusMessage(tvStatusMessage, planKey, latestError)
         llKeyDetails.visibility = if (planKey.isExpanded) View.VISIBLE else View.GONE
         tvCollapsedHint.visibility = if (planKey.isExpanded) View.GONE else View.VISIBLE
         llKeyHeader.setOnClickListener { onTogglePlanKey(planKey.id) }
@@ -122,18 +109,18 @@ class PlanUsageKeyAdapter(
         val usage = planKey.cachedUsage
         if (usage == null) {
             cardBinding.tvEmptyUsageHint.text = if (planKey.lastUpdatedAt == null) {
-                "暂无缓存，点击刷新全部获取最新额度"
+                "暂无最后有效额度数据"
             } else {
-                "当前 Key 无可用订阅或额度已耗尽"
+                "当前暂无可展示的额度快照"
             }
             cardBinding.tvEmptyUsageHint.visibility = View.VISIBLE
             cardBinding.llPrimaryDetails.visibility = View.VISIBLE
-            val dayWindowLabel = resolveWindowLabel(
+            val dayWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 planKey.cachedDayWindowStartAt,
                 planKey.cachedDayWindowEndAt,
                 FALLBACK_SHORT_CYCLE_LABEL
             )
-            val weekWindowLabel = resolveWindowLabel(
+            val weekWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 planKey.cachedWeekWindowStartAt,
                 planKey.cachedWeekWindowEndAt,
                 FALLBACK_WEEK_CYCLE_LABEL
@@ -143,30 +130,30 @@ class PlanUsageKeyAdapter(
                 cardBinding.tvDetailLabelFirst,
                 cardBinding.tvDetailValueFirst,
                 "开始时间",
-                formatBeijingTime(planKey.cachedStartAt)
+                PlanUsageFormatter.formatBeijingTime(planKey.cachedStartAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowSecond,
                 cardBinding.tvDetailLabelSecond,
                 cardBinding.tvDetailValueSecond,
                 "到期时间",
-                formatBeijingTime(planKey.cachedEndAt)
+                PlanUsageFormatter.formatBeijingTime(planKey.cachedEndAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowThird,
                 cardBinding.tvDetailLabelThird,
                 cardBinding.tvDetailValueThird,
                 "${dayWindowLabel}窗口结束",
-                formatWindowEndAt(planKey.cachedDayWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(planKey.cachedDayWindowEndAt)
             )
             bindDetailRow(
                 cardBinding.llDetailRowFourth,
                 cardBinding.tvDetailLabelFourth,
                 cardBinding.tvDetailValueFourth,
                 "${weekWindowLabel}窗口结束",
-                formatWindowEndAt(planKey.cachedWeekWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(planKey.cachedWeekWindowEndAt)
             )
-            bindLastUpdatedRow(cardBinding, planKey.lastUpdatedAt)
+            bindLastUpdatedRow(cardBinding, planKey)
             return
         }
 
@@ -190,29 +177,30 @@ class PlanUsageKeyAdapter(
             cardBinding.tvDetailLabelThird,
             cardBinding.tvDetailValueThird,
             "开始时间",
-            formatBeijingTime(usage.startAt ?: planKey.cachedStartAt)
+            PlanUsageFormatter.formatBeijingTime(usage.startAt ?: planKey.cachedStartAt)
         )
         bindDetailRow(
             cardBinding.llDetailRowFourth,
             cardBinding.tvDetailLabelFourth,
             cardBinding.tvDetailValueFourth,
             "到期时间",
-            formatBeijingTime(usage.endAt ?: planKey.cachedEndAt)
+            PlanUsageFormatter.formatBeijingTime(usage.endAt ?: planKey.cachedEndAt)
         )
 
         if (usage.hasCycleUsage()) {
-            val dayWindowLabel = resolveWindowLabel(
+            val dayWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 usage.dayWindowStartAt ?: planKey.cachedDayWindowStartAt,
                 usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt,
                 FALLBACK_SHORT_CYCLE_LABEL
             )
-            val weekWindowLabel = resolveWindowLabel(
+            val weekWindowLabel = PlanUsageFormatter.resolveWindowLabel(
                 usage.weekWindowStartAt ?: planKey.cachedWeekWindowStartAt,
                 usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
                 FALLBACK_WEEK_CYCLE_LABEL
             )
             cardBinding.tvCycleTitle.visibility = View.VISIBLE
             bindUsageQuota(
+                planKey = planKey,
                 context = cardBinding.root.context,
                 titleView = cardBinding.tvDayQuotaTitle,
                 detailView = cardBinding.tvDayQuotaDetail,
@@ -225,6 +213,7 @@ class PlanUsageKeyAdapter(
             )
             cardBinding.llDayQuota.visibility = View.VISIBLE
             bindUsageQuota(
+                planKey = planKey,
                 context = cardBinding.root.context,
                 titleView = cardBinding.tvWeekQuotaTitle,
                 detailView = cardBinding.tvWeekQuotaDetail,
@@ -241,20 +230,20 @@ class PlanUsageKeyAdapter(
                 cardBinding.tvCycleWindowEndLabelFirst,
                 cardBinding.tvCycleWindowEndValueFirst,
                 "${dayWindowLabel}窗口结束",
-                formatWindowEndAt(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(usage.dayWindowEndAt ?: planKey.cachedDayWindowEndAt)
             )
             bindDetailRow(
                 cardBinding.llCycleWindowEndSecond,
                 cardBinding.tvCycleWindowEndLabelSecond,
                 cardBinding.tvCycleWindowEndValueSecond,
                 "${weekWindowLabel}窗口结束",
-                formatWindowEndAt(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(usage.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt)
             )
         }
         if (usage.hasResourceUsage()) {
             cardBinding.tvResourceTitle.visibility = View.VISIBLE
             cardBinding.llTokenQuota.visibility = View.VISIBLE
-            bindTokenQuota(cardBinding, usage)
+            bindTokenQuota(cardBinding, planKey)
         }
         if (!usage.hasResourceUsage() && !usage.hasCycleUsage()) {
             cardBinding.tvNoQuotaHint.visibility = View.VISIBLE
@@ -273,7 +262,59 @@ class PlanUsageKeyAdapter(
             "分组倍率",
             formatGroupMultipliers(cardBinding.root.context, usage)
         )
-        bindLastUpdatedRow(cardBinding, planKey.lastUpdatedAt)
+        bindLastUpdatedRow(cardBinding, planKey)
+    }
+
+    /**
+     * 卡片顶部优先展示本次临时刷新错误，否则展示最近一次确定的查询状态。
+     * @param messageView 卡片标题下方的状态文本
+     * @param planKey 当前 Key、最新查询状态和历史快照
+     * @param latestError 当前页面会话内最近一次刷新错误
+     */
+    private fun bindStatusMessage(
+        messageView: TextView,
+        planKey: SavedPlanKey,
+        latestError: String?
+    ) {
+        val statusMessage = latestError?.let { error ->
+            if (planKey.cachedUsage == null) {
+                "本次刷新失败：$error"
+            } else {
+                "本次刷新失败：$error，保留上次数据"
+            }
+        } ?: resolveQueryStatusMessage(planKey)
+        messageView.text = statusMessage.orEmpty()
+        messageView.visibility = if (statusMessage == null) View.GONE else View.VISIBLE
+        val colorResId = when {
+            latestError != null -> R.color.plan_usage_warning
+            planKey.queryStatus == PlanUsageQueryStatus.EXPIRED ||
+                planKey.queryStatus == PlanUsageQueryStatus.INVALID_API_KEY -> R.color.plan_usage_danger
+            else -> R.color.plan_usage_warning
+        }
+        messageView.setTextColor(messageView.context.getColor(colorResId))
+    }
+
+    /** 将持久化查询状态转换为确定文案，并根据是否有历史快照避免承诺不存在的数据。 */
+    private fun resolveQueryStatusMessage(planKey: SavedPlanKey): String? {
+        val hasCachedUsage = planKey.cachedUsage != null
+        return when (planKey.queryStatus) {
+            PlanUsageQueryStatus.ACTIVE -> null
+            PlanUsageQueryStatus.EXPIRED -> if (hasCachedUsage) {
+                "订阅已过期，当前展示最后有效数据"
+            } else {
+                "订阅已过期，暂无历史用量数据"
+            }
+            PlanUsageQueryStatus.INVALID_API_KEY -> if (hasCachedUsage) {
+                "API Key 无效或已失效，当前展示最后有效数据"
+            } else {
+                "API Key 无效或已失效"
+            }
+            PlanUsageQueryStatus.UNKNOWN -> if (hasCachedUsage) {
+                "订阅状态待刷新，当前展示历史数据"
+            } else {
+                "订阅状态待刷新"
+            }
+        }
     }
 
     /**
@@ -319,20 +360,27 @@ class PlanUsageKeyAdapter(
     /**
      * 每张卡片单独显示最后成功更新时刻，用户可以区分缓存数据和本次刷新结果。
      * @param cardBinding 当前卡片 Binding
-     * @param lastUpdatedAt 本地缓存最后成功更新时间
+     * @param planKey 当前 Key 及其最后有效数据时间
      */
-    private fun bindLastUpdatedRow(cardBinding: ItemPlanUsageKeyBinding, lastUpdatedAt: Long?) {
+    private fun bindLastUpdatedRow(cardBinding: ItemPlanUsageKeyBinding, planKey: SavedPlanKey) {
+        val hasAvailableSnapshot = planKey.cachedUsage != null
+        val timeMillis = if (hasAvailableSnapshot) planKey.lastUpdatedAt else planKey.lastCheckedAt
         bindDetailRow(
             cardBinding.llLastUpdatedRow,
             cardBinding.tvLastUpdatedLabel,
             cardBinding.tvLastUpdatedValue,
-            "上次更新",
-            lastUpdatedAt?.let { formatLocalTime(it) } ?: "未查询"
+            when {
+                !hasAvailableSnapshot -> "本次检查"
+                planKey.queryStatus == PlanUsageQueryStatus.ACTIVE -> "上次更新"
+                else -> "最后有效数据"
+            },
+            timeMillis?.let { PlanUsageFormatter.formatLocalTime(it) } ?: "未查询"
         )
     }
 
     /**
      * 将周期订阅金额、预警颜色和渐变进度条同步更新，避免动态创建或拆分进度 View。
+     * @param planKey 当前额度所属 Key，用于输出脱敏诊断信息
      * @param context 当前卡片的资源上下文
      * @param titleView 额度标题
      * @param detailView 已用、总额和剩余额度文本
@@ -344,6 +392,7 @@ class PlanUsageKeyAdapter(
      * @param remainingUsd 服务端剩余额度
      */
     private fun bindUsageQuota(
+        planKey: SavedPlanKey,
         context: Context,
         titleView: TextView,
         detailView: TextView,
@@ -354,43 +403,133 @@ class PlanUsageKeyAdapter(
         limitUsd: Double?,
         remainingUsd: Double?
     ) {
-        val displayUsedUsd = calculateDisplayUsedUsd(usedUsd, limitUsd, remainingUsd)
-        val usedRate = calculateUsedRate(displayUsedUsd, limitUsd)
-        val isWarning = isCycleQuotaExhausted(limitUsd, remainingUsd) ||
-            isProgressOverWarningThreshold(usedRate)
+        val quotaResult = PlanUsageQuotaCalculator.calculateCycleQuota(
+            usedUsd = usedUsd,
+            limitUsd = limitUsd,
+            remainingUsd = remainingUsd
+        )
         val textColor = context.getColor(
-            if (isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
+            if (quotaResult.isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
         )
         titleView.text = title
-        detailView.text = "已用 ${formatUsd(displayUsedUsd)} / ${formatUsd(limitUsd)}，剩余 ${formatUsd(remainingUsd)}"
+        detailView.text =
+            "已用 ${PlanUsageFormatter.formatUsd(quotaResult.displayUsedUsd)} / " +
+                "${PlanUsageFormatter.formatUsd(limitUsd)}，剩余 ${PlanUsageFormatter.formatUsd(remainingUsd)}"
         detailView.setTextColor(textColor)
-        percentView.text = "已用${formatPercent(usedRate)}"
+        percentView.text = "已用${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}"
         percentView.setTextColor(textColor)
-        updateProgressBar(progressBar, usedRate, isWarning)
+        updateProgressBar(progressBar, quotaResult.usedRate, quotaResult.isWarning)
+        logCycleQuotaProgress(
+            planKey = planKey,
+            title = title,
+            usedUsd = usedUsd,
+            limitUsd = limitUsd,
+            remainingUsd = remainingUsd,
+            quotaResult = quotaResult,
+            progressBar = progressBar
+        )
     }
 
     /**
      * 将资源包 token 用量写入固定 XML 节点，和周期额度共用相同的预警阈值。
      * @param cardBinding 当前卡片 Binding
-     * @param usage 当前 Key 返回的用量快照
+     * @param planKey 当前 Key 及其最后有效用量快照
      */
-    private fun bindTokenQuota(cardBinding: ItemPlanUsageKeyBinding, usage: PlanUsageSnapshot) {
-        val total = calculateTokenTotal(usage.totalTokens, usage.consumedTokens, usage.remainingTokens)
-        val usedRate = calculateTokenUsedRate(usage.consumedTokens, total)
-        val isWarning = isProgressOverWarningThreshold(usedRate)
+    private fun bindTokenQuota(cardBinding: ItemPlanUsageKeyBinding, planKey: SavedPlanKey) {
+        val usage = planKey.cachedUsage ?: return
+        val quotaResult = PlanUsageQuotaCalculator.calculateTokenQuota(usage)
         val textColor = cardBinding.root.context.getColor(
-            if (isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
+            if (quotaResult.isWarning) R.color.plan_usage_danger else R.color.plan_usage_text_secondary
         )
         cardBinding.tvTokenQuotaDetail.text =
-            "已用 ${formatToken(usage.consumedTokens)} / ${formatToken(total)}，剩余 ${formatToken(usage.remainingTokens)}"
+            "已用 ${PlanUsageFormatter.formatToken(usage.consumedTokens)} / " +
+                "${PlanUsageFormatter.formatToken(quotaResult.totalTokens)}，" +
+                "剩余 ${PlanUsageFormatter.formatToken(usage.remainingTokens)}"
         cardBinding.tvTokenQuotaDetail.setTextColor(textColor)
-        cardBinding.tvTokenQuotaPercent.text = "已用${formatPercent(usedRate)}"
+        cardBinding.tvTokenQuotaPercent.text =
+            "已用${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}"
         cardBinding.tvTokenQuotaPercent.setTextColor(textColor)
         updateProgressBar(
             cardBinding.pbTokenQuotaProgress,
-            usedRate,
-            isWarning
+            quotaResult.usedRate,
+            quotaResult.isWarning
         )
+        logTokenQuotaProgress(
+            planKey = planKey,
+            usage = usage,
+            quotaResult = quotaResult,
+            progressBar = cardBinding.pbTokenQuotaProgress
+        )
+    }
+
+    /**
+     * 在 View 完成布局后记录周期额度的原始值、计算结果和 Drawable 实际等级。
+     * @param planKey 当前额度所属 Key
+     * @param title 日额度或周额度标题
+     * @param usedUsd 服务端已用金额
+     * @param limitUsd 服务端总额度
+     * @param remainingUsd 服务端剩余额度
+     * @param quotaResult 页面使用的额度计算结果
+     * @param progressBar 当前额度进度控件
+     */
+    private fun logCycleQuotaProgress(
+        planKey: SavedPlanKey,
+        title: String,
+        usedUsd: Double?,
+        limitUsd: Double?,
+        remainingUsd: Double?,
+        quotaResult: PlanUsageQuotaCalculator.CycleQuotaResult,
+        progressBar: ProgressBar
+    ) {
+        if (!BuildConfig.DEBUG) {
+            return
+        }
+        progressBar.post {
+            val expectedFilledWidth = progressBar.width * (quotaResult.usedRate ?: 0.0)
+            Log.d(
+                PLAN_USAGE_PROGRESS_LOG_TAG,
+                "key=${PlanUsageFormatter.maskKey(planKey.apiKey)}，名称=${planKey.name}，" +
+                    "额度=$title，rawUsedUsd=$usedUsd，rawLimitUsd=$limitUsd，" +
+                    "rawRemainingUsd=$remainingUsd，displayUsedUsd=${quotaResult.displayUsedUsd}，" +
+                    "usedRate=${quotaResult.usedRate}，" +
+                    "percentText=${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}，" +
+                    "progress=${progressBar.progress}/${progressBar.max}，" +
+                    "drawableLevel=${progressBar.progressDrawable?.level}，width=${progressBar.width}，" +
+                    "expectedFilledWidth=$expectedFilledWidth，queryStatus=${planKey.queryStatus}"
+            )
+        }
+    }
+
+    /**
+     * 在 View 完成布局后记录资源包 token 的原始值、计算结果和 Drawable 实际等级。
+     * @param planKey 当前资源包所属 Key
+     * @param usage 当前 Key 的最后有效用量快照
+     * @param quotaResult 页面使用的 token 额度计算结果
+     * @param progressBar token 进度控件
+     */
+    private fun logTokenQuotaProgress(
+        planKey: SavedPlanKey,
+        usage: PlanUsageSnapshot,
+        quotaResult: PlanUsageQuotaCalculator.TokenQuotaResult,
+        progressBar: ProgressBar
+    ) {
+        if (!BuildConfig.DEBUG) {
+            return
+        }
+        progressBar.post {
+            val expectedFilledWidth = progressBar.width * (quotaResult.usedRate ?: 0.0)
+            Log.d(
+                PLAN_USAGE_PROGRESS_LOG_TAG,
+                "key=${PlanUsageFormatter.maskKey(planKey.apiKey)}，名称=${planKey.name}，额度=资源包，" +
+                    "rawConsumedTokens=${usage.consumedTokens}，rawTotalTokens=${usage.totalTokens}，" +
+                    "rawRemainingTokens=${usage.remainingTokens}，" +
+                    "calculatedTotalTokens=${quotaResult.totalTokens}，usedRate=${quotaResult.usedRate}，" +
+                    "percentText=${PlanUsageFormatter.formatPercent(quotaResult.usedRate)}，" +
+                    "progress=${progressBar.progress}/${progressBar.max}，" +
+                    "drawableLevel=${progressBar.progressDrawable?.level}，width=${progressBar.width}，" +
+                    "expectedFilledWidth=$expectedFilledWidth，queryStatus=${planKey.queryStatus}"
+            )
+        }
     }
 
     /**
@@ -405,112 +544,10 @@ class PlanUsageKeyAdapter(
         isWarning: Boolean
     ) {
         val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        progressBar.progressDrawable = QuotaProgressDrawable(progressBar.context, isWarning)
+        val quotaProgressDrawable = QuotaProgressDrawable(progressBar.context, isWarning)
+        progressBar.progressDrawable = quotaProgressDrawable
         progressBar.progress = (progressRate * PROGRESS_MAX).roundToInt()
-    }
-
-    /**
-     * 周期接口只给剩余额度时，用 limit-remaining 补出展示已用值。
-     */
-    private fun calculateDisplayUsedUsd(usedUsd: Double?, limitUsd: Double?, remainingUsd: Double?): Double? {
-        if (usedUsd != null) {
-            return usedUsd
-        }
-        if (limitUsd != null && remainingUsd != null && limitUsd > 0.0) {
-            return (limitUsd - remainingUsd).coerceIn(0.0, limitUsd)
-        }
-        return usedUsd
-    }
-
-    private fun calculateUsedRate(usedUsd: Double?, limitUsd: Double?): Double? {
-        if (usedUsd == null || limitUsd == null || limitUsd <= 0.0) {
-            return null
-        }
-        return (usedUsd / limitUsd).coerceIn(0.0, 1.0)
-    }
-
-    /**
-     * 周期额度有正额度且剩余额度小于等于 0 时，按额度耗尽处理。
-     */
-    private fun isCycleQuotaExhausted(limitUsd: Double?, remainingUsd: Double?): Boolean {
-        return limitUsd != null && limitUsd > 0.0 && remainingUsd != null && remainingUsd <= 0.0
-    }
-
-    /**
-     * 已用比例超过 80% 时进入预警态，说明文本切换危险色，渐变条本身仍按真实已用比例着色。
-     * @param usedRate 当前已用比例
-     */
-    private fun isProgressOverWarningThreshold(usedRate: Double?): Boolean {
-        return usedRate != null && usedRate > PROGRESS_WARNING_THRESHOLD
-    }
-
-    private fun calculateTokenTotal(totalTokens: Long?, consumedTokens: Long?, remainingTokens: Long?): Long? {
-        if (totalTokens != null && totalTokens > 0L) {
-            return totalTokens
-        }
-        if (consumedTokens != null && remainingTokens != null) {
-            return consumedTokens + remainingTokens
-        }
-        return totalTokens
-    }
-
-    private fun calculateTokenUsedRate(consumedTokens: Long?, totalTokens: Long?): Double? {
-        if (consumedTokens == null || totalTokens == null || totalTokens <= 0L) {
-            return null
-        }
-        return (consumedTokens.toDouble() / totalTokens.toDouble()).coerceIn(0.0, 1.0)
-    }
-
-    /** 多 Key 的窗口时间已经随各自条目缓存，格式化时不再读取全局 SP 字段。 */
-    private fun formatWindowEndAt(windowEndAt: String?): String {
-        return formatBeijingTime(windowEndAt)
-    }
-
-    /**
-     * 根据服务端返回的窗口起止时间确定展示周期，接口调整重置频率时不再依赖固定的日/周文案。
-     * @param windowStartAt 服务端窗口开始时间
-     * @param windowEndAt 服务端窗口结束时间
-     * @param fallbackLabel 旧缓存缺少开始时间时的保守展示名称
-     */
-    private fun resolveWindowLabel(windowStartAt: String?, windowEndAt: String?, fallbackLabel: String): String {
-        val startTime = parseWindowEndAt(windowStartAt)?.time ?: return fallbackLabel
-        val endTime = parseWindowEndAt(windowEndAt)?.time ?: return fallbackLabel
-        val durationMinutes = (endTime - startTime) / MILLIS_PER_MINUTE
-        if (durationMinutes <= 0L) {
-            return fallbackLabel
-        }
-        return when (durationMinutes) {
-            MINUTES_PER_DAY -> "日"
-            MINUTES_PER_WEEK -> "周"
-            else -> when {
-                durationMinutes % MINUTES_PER_DAY == 0L -> "${durationMinutes / MINUTES_PER_DAY}天"
-                durationMinutes % MINUTES_PER_HOUR == 0L -> "${durationMinutes / MINUTES_PER_HOUR}小时"
-                else -> "${durationMinutes}分钟"
-            }
-        }
-    }
-
-    /** 将服务端 UTC 窗口结束时间固定展示为北京时间。 */
-    private fun formatBeijingTime(windowEndAt: String?): String {
-        val date = parseWindowEndAt(windowEndAt) ?: return "--"
-        return "${BEIJING_TIME_FORMAT.format(date)} 北京时间"
-    }
-
-    /** 本地缓存更新时间以北京时间展示，和服务端返回的窗口时间保持同一种阅读习惯。 */
-    private fun formatLocalTime(timeMillis: Long): String {
-        return "${BEIJING_TIME_FORMAT.format(Date(timeMillis))} 北京时间"
-    }
-
-    private fun parseWindowEndAt(windowEndAt: String?): Date? {
-        if (windowEndAt.isNullOrBlank()) {
-            return null
-        }
-        ISO_DATE_FORMATS.forEach { dateFormat ->
-            runCatching { dateFormat.parse(windowEndAt) }.getOrNull()?.let { date ->
-                return date
-            }
-        }
-        return null
+        quotaProgressDrawable.syncProgressRate(progressRate)
     }
 
     /**
@@ -536,7 +573,9 @@ class PlanUsageKeyAdapter(
             val start = textBuilder.length
             val groupName = usage.groupNames[groupId] ?: groupId
             val multiplierValue = usage.groupMultipliers[groupId]
-            val multiplier = multiplierValue?.let { "x${usdFormatter.format(it)}" } ?: "x--"
+            val multiplier = multiplierValue?.let {
+                "x${PlanUsageFormatter.formatDecimal(it)}"
+            } ?: "x--"
             textBuilder.append("$groupName $multiplier")
             val end = textBuilder.length
             resolveGroupMultiplierColorResId(groupId, groupName, multiplierValue)?.let { colorResId ->
@@ -562,44 +601,12 @@ class PlanUsageKeyAdapter(
      * @param multiplier 当前 key 对应的分组倍率
      */
     private fun resolveGroupMultiplierColorResId(groupId: String, groupName: String, multiplier: Double?): Int? {
-        val defaultMultiplier = resolveDefaultGroupMultiplier(groupId, groupName) ?: return null
-        return when {
-            multiplier == null || multiplier == defaultMultiplier -> null
-            multiplier < defaultMultiplier -> R.color.plan_usage_success
-            else -> R.color.plan_usage_danger
-        }
-    }
-
-    /**
-     * 默认倍率基线来自当前套餐规则：Codex Pro 为 x2，Codex 为 x1。
-     * @param groupId 服务端返回的分组 ID
-     * @param groupName 服务端返回的分组名称
-     */
-    private fun resolveDefaultGroupMultiplier(groupId: String, groupName: String): Double? {
-        return when {
-            groupId == GROUP_ID_CODEX_PRO || groupName == GROUP_NAME_CODEX_PRO -> DEFAULT_CODEX_PRO_GROUP_MULTIPLIER
-            groupId == GROUP_ID_CODEX || groupName == GROUP_NAME_CODEX -> DEFAULT_CODEX_GROUP_MULTIPLIER
-            else -> null
-        }
-    }
-
-    private fun formatPercent(usedRate: Double?): String {
-        return usedRate?.let { "${percentFormatter.format(it * 100)}%" } ?: "--"
-    }
-
-    private fun formatUsd(value: Double?): String {
-        return value?.let { "${'$'}${usdFormatter.format(it)}" } ?: "--"
-    }
-
-    private fun formatToken(value: Long?): String {
-        return value?.let { tokenFormatter.format(it) } ?: "--"
-    }
-
-    private fun maskKey(apiKey: String): String {
-        return if (apiKey.length <= MASK_KEY_SHORT_LENGTH) {
-            "${apiKey.take(4)}****"
-        } else {
-            "${apiKey.take(9)}****${apiKey.takeLast(6)}"
+        return when (
+            PlanUsageQuotaCalculator.resolveGroupMultiplierTrend(groupId, groupName, multiplier)
+        ) {
+            PlanUsageQuotaCalculator.GroupMultiplierTrend.LOWER -> R.color.plan_usage_success
+            PlanUsageQuotaCalculator.GroupMultiplierTrend.HIGHER -> R.color.plan_usage_danger
+            null -> null
         }
     }
 
@@ -629,34 +636,10 @@ class PlanUsageKeyAdapter(
             }
         }
 
-        private const val PROGRESS_WARNING_THRESHOLD = 0.8
         /** ProgressBar 以 0.1% 为最小单位，避免 0.9% 等小用量被截断为零。 */
         private const val PROGRESS_MAX = 1_000
         private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"
         private const val FALLBACK_WEEK_CYCLE_LABEL = "周"
-        private const val MILLIS_PER_MINUTE = 60_000L
-        private const val MINUTES_PER_HOUR = 60L
-        private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
-        private const val MINUTES_PER_WEEK = 7L * MINUTES_PER_DAY
-        /** 分组默认倍率基线，用于判断接口返回倍率是否低于常规值。 */
-        private const val GROUP_ID_CODEX_PRO = "ffa027fc-8402-4b99-8db2-66eefc87325f"
-        private const val GROUP_ID_CODEX = "ffa2f93c-6a1f-4bbd-a968-632ae3654465"
-        private const val GROUP_NAME_CODEX_PRO = "Codex Pro"
-        private const val GROUP_NAME_CODEX = "Codex"
-        private const val DEFAULT_CODEX_PRO_GROUP_MULTIPLIER = 2.0
-        private const val DEFAULT_CODEX_GROUP_MULTIPLIER = 1.0
-        private const val MASK_KEY_SHORT_LENGTH = 15
-        private val BEIJING_TIME_ZONE = TimeZone.getTimeZone("Asia/Shanghai")
-        private val BEIJING_TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).apply {
-            timeZone = BEIJING_TIME_ZONE
-        }
-        private val ISO_DATE_FORMATS = listOf<DateFormat>(
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            },
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-        )
+        private const val PLAN_USAGE_PROGRESS_LOG_TAG = "PlanUsageProgress"
     }
 }

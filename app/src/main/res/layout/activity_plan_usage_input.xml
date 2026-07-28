@@ -84,6 +84,31 @@
             android:visibility="gone"
             tools:visibility="visible">
 
+            <FrameLayout
+                android:id="@+id/flUpdateProgress"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="10dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <com.hss.myroutin.widget.UpdateCircleProgressView
+                    android:id="@+id/ucpUpdateProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <ImageButton
+                    android:id="@+id/btnToggleUpdateDownload"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="暂停下载"
+                    android:padding="14dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_update_float_pause"
+                    app:tint="@color/plan_usage_text_primary" />
+            </FrameLayout>
+
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -110,31 +135,6 @@
                     android:textSize="12sp"
                     tools:text="8.4 MB / 12.4 MB" />
             </LinearLayout>
-
-            <FrameLayout
-                android:id="@+id/flUpdateProgress"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:visibility="gone"
-                tools:visibility="visible">
-
-                <com.hss.myroutin.widget.UpdateCircleProgressView
-                    android:id="@+id/ucpUpdateProgress"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent" />
-
-                <ImageButton
-                    android:id="@+id/btnToggleUpdateDownload"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="暂停下载"
-                    android:padding="14dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_update_float_pause"
-                    app:tint="@color/plan_usage_text_primary" />
-            </FrameLayout>
 
             <TextView
                 android:id="@+id/btnUpdateAction"

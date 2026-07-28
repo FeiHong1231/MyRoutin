@@ -7,7 +7,7 @@ import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -22,12 +22,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.roundToInt
 
 /**
  * 说明：订阅 Key 卡片列表适配器，负责将缓存数据格式化并绑定到 XML 卡片；Activity 只处理页面级交互。
  *
  * @作者 huangssh
- * @版本 2.2
+ * @版本 2.3
  */
 class PlanUsageKeyAdapter(
     private val onTogglePlanKey: (String) -> Unit,
@@ -215,8 +216,7 @@ class PlanUsageKeyAdapter(
                 titleView = cardBinding.tvDayQuotaTitle,
                 detailView = cardBinding.tvDayQuotaDetail,
                 percentView = cardBinding.tvDayQuotaPercent,
-                progressFill = cardBinding.vDayQuotaProgressFill,
-                progressSpacer = cardBinding.vDayQuotaProgressSpacer,
+                progressBar = cardBinding.pbDayQuotaProgress,
                 title = "${dayWindowLabel}额度",
                 usedUsd = usage.dailyUsedUsd,
                 limitUsd = usage.dailyLimitUsd,
@@ -228,8 +228,7 @@ class PlanUsageKeyAdapter(
                 titleView = cardBinding.tvWeekQuotaTitle,
                 detailView = cardBinding.tvWeekQuotaDetail,
                 percentView = cardBinding.tvWeekQuotaPercent,
-                progressFill = cardBinding.vWeekQuotaProgressFill,
-                progressSpacer = cardBinding.vWeekQuotaProgressSpacer,
+                progressBar = cardBinding.pbWeekQuotaProgress,
                 title = "${weekWindowLabel}额度",
                 usedUsd = usage.weeklyUsedUsd,
                 limitUsd = usage.weeklyLimitUsd,
@@ -332,13 +331,12 @@ class PlanUsageKeyAdapter(
     }
 
     /**
-     * 将周期订阅金额、预警颜色和 XML 进度条权重同步更新，避免动态创建进度 View。
+     * 将周期订阅金额、预警颜色和渐变进度条同步更新，避免动态创建或拆分进度 View。
      * @param context 当前卡片的资源上下文
      * @param titleView 额度标题
      * @param detailView 已用、总额和剩余额度文本
      * @param percentView 已用比例文本
-     * @param progressFill 进度条前景节点
-     * @param progressSpacer 进度条剩余空间节点
+     * @param progressBar 根据实际已用比例绘制的系统进度控件
      * @param title 当前周期名称
      * @param usedUsd 服务端已用金额
      * @param limitUsd 服务端总额度
@@ -349,8 +347,7 @@ class PlanUsageKeyAdapter(
         titleView: TextView,
         detailView: TextView,
         percentView: TextView,
-        progressFill: View,
-        progressSpacer: View,
+        progressBar: ProgressBar,
         title: String,
         usedUsd: Double?,
         limitUsd: Double?,
@@ -368,7 +365,7 @@ class PlanUsageKeyAdapter(
         detailView.setTextColor(textColor)
         percentView.text = "已用${formatPercent(usedRate)}"
         percentView.setTextColor(textColor)
-        updateProgressBar(progressFill, progressSpacer, usedRate, isWarning)
+        updateProgressBar(progressBar, usedRate, isWarning)
     }
 
     /**
@@ -389,42 +386,32 @@ class PlanUsageKeyAdapter(
         cardBinding.tvTokenQuotaPercent.text = "已用${formatPercent(usedRate)}"
         cardBinding.tvTokenQuotaPercent.setTextColor(textColor)
         updateProgressBar(
-            cardBinding.vTokenQuotaProgressFill,
-            cardBinding.vTokenQuotaProgressSpacer,
+            cardBinding.pbTokenQuotaProgress,
             usedRate,
             isWarning
         )
     }
 
     /**
-     * 通过 XML 中两个固定子节点的权重表示进度，零用量不创建前景节点且仍保留底轨。
-     * @param progressFill 进度条前景节点
-     * @param progressSpacer 进度条剩余空间节点
+     * 将已用比例转换为系统控件的千分位进度，并按预警状态切换进度 Drawable。
+     * @param progressBar 当前额度对应的系统进度控件
      * @param usedRate 当前已用比例
-     * @param isWarning 是否使用预警渐变
+     * @param isWarning 是否展示红橙预警渐变
      */
     private fun updateProgressBar(
-        progressFill: View,
-        progressSpacer: View,
+        progressBar: ProgressBar,
         usedRate: Double?,
         isWarning: Boolean
     ) {
         val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        val progressWeight = if (progressRate <= 0f) {
-            0f
-        } else {
-            (progressRate * PROGRESS_WEIGHT_TOTAL).coerceAtLeast(1f)
-        }
-        val remainingWeight = (PROGRESS_WEIGHT_TOTAL - progressWeight).coerceAtLeast(0f)
-        val fillLayoutParams = progressFill.layoutParams as LinearLayout.LayoutParams
-        fillLayoutParams.weight = progressWeight
-        progressFill.layoutParams = fillLayoutParams
-        val spacerLayoutParams = progressSpacer.layoutParams as LinearLayout.LayoutParams
-        spacerLayoutParams.weight = remainingWeight
-        progressSpacer.layoutParams = spacerLayoutParams
-        progressFill.setBackgroundResource(
-            if (isWarning) R.drawable.bg_plan_usage_progress_warning else R.drawable.bg_plan_usage_progress_normal
+        progressBar.progressDrawable = progressBar.context.getDrawable(
+            if (isWarning) {
+                R.drawable.progress_plan_usage_quota_warning
+            } else {
+                R.drawable.progress_plan_usage_quota_normal
+            }
         )
+        progressBar.progress = (progressRate * PROGRESS_MAX).roundToInt()
     }
 
     /**
@@ -455,7 +442,7 @@ class PlanUsageKeyAdapter(
     }
 
     /**
-     * 已用比例超过 80% 时进入预警态，进度说明和进度条同步使用红色。
+     * 已用比例超过 80% 时进入预警态，说明文本切换危险色，渐变条本身仍按真实已用比例着色。
      * @param usedRate 当前已用比例
      */
     private fun isProgressOverWarningThreshold(usedRate: Double?): Boolean {
@@ -648,7 +635,8 @@ class PlanUsageKeyAdapter(
         }
 
         private const val PROGRESS_WARNING_THRESHOLD = 0.8
-        private const val PROGRESS_WEIGHT_TOTAL = 1000f
+        /** ProgressBar 以 0.1% 为最小单位，避免 0.9% 等小用量被截断为零。 */
+        private const val PROGRESS_MAX = 1_000
         private const val FALLBACK_SHORT_CYCLE_LABEL = "短周期"
         private const val FALLBACK_WEEK_CYCLE_LABEL = "周"
         private const val MILLIS_PER_MINUTE = 60_000L

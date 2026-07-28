@@ -295,26 +295,15 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <LinearLayout
-                android:id="@+id/llDayQuotaProgress"
+            <ProgressBar
+                android:id="@+id/pbDayQuotaProgress"
+                style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
-                android:background="@drawable/bg_plan_usage_progress_track"
-                android:orientation="horizontal">
-
-                <View
-                    android:id="@+id/vDayQuotaProgressFill"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="0" />
-
-                <View
-                    android:id="@+id/vDayQuotaProgressSpacer"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1000" />
-            </LinearLayout>
+                android:indeterminate="false"
+                android:max="1000"
+                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
         </LinearLayout>
 
         <LinearLayout
@@ -358,26 +347,15 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <LinearLayout
-                android:id="@+id/llWeekQuotaProgress"
+            <ProgressBar
+                android:id="@+id/pbWeekQuotaProgress"
+                style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
-                android:background="@drawable/bg_plan_usage_progress_track"
-                android:orientation="horizontal">
-
-                <View
-                    android:id="@+id/vWeekQuotaProgressFill"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="0" />
-
-                <View
-                    android:id="@+id/vWeekQuotaProgressSpacer"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1000" />
-            </LinearLayout>
+                android:indeterminate="false"
+                android:max="1000"
+                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
         </LinearLayout>
 
         <LinearLayout
@@ -474,26 +452,15 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <LinearLayout
-                android:id="@+id/llTokenQuotaProgress"
+            <ProgressBar
+                android:id="@+id/pbTokenQuotaProgress"
+                style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="8dp"
                 android:layout_marginTop="6dp"
-                android:background="@drawable/bg_plan_usage_progress_track"
-                android:orientation="horizontal">
-
-                <View
-                    android:id="@+id/vTokenQuotaProgressFill"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="0" />
-
-                <View
-                    android:id="@+id/vTokenQuotaProgressSpacer"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1000" />
-            </LinearLayout>
+                android:indeterminate="false"
+                android:max="1000"
+                android:progressDrawable="@drawable/progress_plan_usage_quota_normal" />
         </LinearLayout>
 
         <TextView

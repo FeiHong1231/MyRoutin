@@ -1,26 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
     <color name="teal_200">#FF03DAC5</color>
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="white_f5f6fa">#F5F6FA</color>
-    <color name="blue_2771fa">#2771FA</color>
-    <color name="blue_528fff">#528fff</color>
-    <color name="blue_e8f0ff">#E8F0FF</color>
-    <color name="orange_fe5d36">#FE5D36</color>
-    <color name="orange_ff9f0a">#FF9F0A</color>
-    <color name="red_ff3b30">#FF3B30</color>
-    <color name="green_34c759">#34C759</color>
-    <color name="gray_212121">#212121</color>
-    <color name="gray_727272">#727272</color>
-    <color name="gray_999999">#999999</color>
-    <color name="gray_eeeeee">#EEEEEE</color>
-    <color name="white_33FFFFFF">#33FFFFFF</color> <!--20%-->
-
     <!-- 订阅查询页采用语义色，夜间模式通过 values-night 覆盖同名资源。 -->
     <color name="plan_usage_page_background">#F5F6FA</color>
     <color name="plan_usage_surface">#FFFFFF</color>

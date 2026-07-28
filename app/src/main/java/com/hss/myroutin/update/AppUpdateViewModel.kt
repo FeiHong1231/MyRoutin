@@ -4,12 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -39,10 +39,11 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
     /** 更新卡片的持续状态，旋转屏幕后可重新渲染当前进度与安装入口。 */
     val uiState: StateFlow<AppUpdateUiState> = _uiState.asStateFlow()
 
-    private val _events = MutableSharedFlow<AppUpdateUiEvent>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
+    /** 页面重建期间暂存安装提示和反馈，避免下载恰好完成时丢失一次性事件。 */
+    private val eventChannel = Channel<AppUpdateUiEvent>(capacity = Channel.UNLIMITED)
 
-    /** 安装提示与手动检查反馈属于一次性副作用，不在旋转页面后重复触发。 */
-    val events: SharedFlow<AppUpdateUiEvent> = _events.asSharedFlow()
+    /** 安装提示与手动检查反馈只由一个前台页面消费，旋转后不会重复处理。 */
+    val events: Flow<AppUpdateUiEvent> = eventChannel.receiveAsFlow()
 
     init {
         checkForUpdate(isManual = false)
@@ -251,17 +252,9 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         updateUiState { it.copy(cardState = AppUpdateCardState.Available(downloadingState.update)) }
     }
 
-    /**
-     * 将下载完成后的 APK 继续交给 Activity 发起系统安装，ViewModel 不持有安装权限或页面 Context。
-     * @return 已校验的 APK；当前非完成状态时返回 null
-     */
-    fun getDownloadedApk(): File? {
-        return (_uiState.value.cardState as? AppUpdateCardState.Downloaded)?.apkFile
-    }
-
-    /** 仅向页面发送一次性事件，避免安装提示和 Toast 被状态重放。 */
+    /** 将一次性事件写入缓冲通道，页面短暂重建时继续保留待处理事件。 */
     private fun sendEvent(event: AppUpdateUiEvent) {
-        _events.tryEmit(event)
+        eventChannel.trySend(event)
     }
 
     /** 所有状态更新经由同一个入口，保证下载回调与检查结果不会覆盖彼此的新状态。 */
@@ -275,9 +268,6 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         super.onCleared()
     }
 
-    private companion object {
-        private const val EVENT_BUFFER_CAPACITY = 4
-    }
 }
 
 /**

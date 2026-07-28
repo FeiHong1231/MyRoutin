@@ -83,28 +83,68 @@ class AppUpdateRepository(
         }
         val targetFile = File(updateDirectory, "MyRoutin-${update.versionCode}.apk")
         val temporaryFile = File(updateDirectory, "MyRoutin-${update.versionCode}.download")
+        val entityTagFile = File(updateDirectory, "MyRoutin-${update.versionCode}.etag")
+        if (!temporaryFile.isFile) {
+            // 校验器必须和同版本分片成对存在，孤立文件不能参与下一次断点续传。
+            entityTagFile.delete()
+        }
         var connection: HttpURLConnection? = null
         var downloadedBytes = temporaryFile.takeIf(File::isFile)?.length() ?: 0L
         var totalBytes = update.apkSizeBytes
         try {
-            val resumeBytes = downloadedBytes
-            val downloadConnection = openConnection(update.apkUrl, resumeBytes)
+            var resumeBytes = downloadedBytes
+            val cachedEntityTag = entityTagFile.takeIf { resumeBytes > 0L }?.let(::readCachedEntityTag)
+            var downloadConnection = openConnection(update.apkUrl, resumeBytes, cachedEntityTag)
             connection = downloadConnection
             activeDownloadConnection = downloadConnection
-            val responseCode = downloadConnection.responseCode
+            var responseCode = downloadConnection.responseCode
             if (responseCode !in HTTP_SUCCESS_RANGE) {
                 throw UpdateHttpException()
             }
-            val shouldAppend = resumeBytes > 0L && responseCode == HTTP_PARTIAL_CONTENT
+            var shouldAppend = resumeBytes > 0L &&
+                responseCode == HTTP_PARTIAL_CONTENT &&
+                isValidResumeResponse(downloadConnection, update, resumeBytes, cachedEntityTag)
+            if (resumeBytes > 0L && responseCode == HTTP_PARTIAL_CONTENT && !shouldAppend) {
+                // 206 缺少有效 Content-Range 或实体校验器不一致时，当前响应不能写入旧分片。
+                if (isPauseRequestedFor(downloadConnection)) {
+                    throw UpdateHttpException()
+                }
+                val rejectedConnection = downloadConnection
+                temporaryFile.delete()
+                entityTagFile.delete()
+                downloadedBytes = 0L
+                resumeBytes = 0L
+                val replacementConnection = openConnection(update.apkUrl)
+                connection = replacementConnection
+                activeDownloadConnection = replacementConnection
+                if (pausedDownloadConnection === rejectedConnection) {
+                    // 用户恰好在重建连接时点击暂停，需要把暂停标记转交给新连接。
+                    pausedDownloadConnection = replacementConnection
+                    replacementConnection.disconnect()
+                }
+                rejectedConnection.disconnect()
+                downloadConnection = replacementConnection
+                responseCode = downloadConnection.responseCode
+                if (responseCode !in HTTP_SUCCESS_RANGE || responseCode == HTTP_PARTIAL_CONTENT) {
+                    throw UpdateHttpException()
+                }
+                shouldAppend = false
+            }
             if (resumeBytes > 0L && !shouldAppend) {
                 // 服务端未接受 Range 时放弃旧分片，避免把完整响应错误追加到临时 APK。
                 temporaryFile.delete()
+                entityTagFile.delete()
                 downloadedBytes = 0L
+                resumeBytes = 0L
             }
+            if (resumeBytes == 0L && responseCode == HTTP_PARTIAL_CONTENT) {
+                // 未请求 Range 却收到不完整响应时禁止继续，避免把部分内容当作完整 APK。
+                throw UpdateHttpException()
+            }
+            persistResponseEntityTag(downloadConnection, entityTagFile)
+            val contentRange = parseContentRange(downloadConnection.getHeaderField(CONTENT_RANGE_HEADER))
             totalBytes = update.apkSizeBytes
-                ?: downloadConnection.getHeaderField(CONTENT_RANGE_HEADER)
-                    ?.substringAfter(CONTENT_RANGE_SEPARATOR, missingDelimiterValue = "")
-                    ?.toLongOrNull()
+                ?: contentRange?.totalBytes
                 ?: downloadConnection.contentLengthLong.takeIf { it > 0L }?.let { contentLength ->
                     if (shouldAppend) downloadedBytes + contentLength else contentLength
                 }
@@ -152,10 +192,11 @@ class AppUpdateRepository(
             if (!temporaryFile.renameTo(targetFile)) {
                 throw IOException("无法保存更新文件")
             }
+            entityTagFile.delete()
             AppUpdateDownloadResult.Success(targetFile)
         } catch (exception: CancellationException) {
             if (!isPauseRequestedFor(connection)) {
-                temporaryFile.delete()
+                deletePartialDownloadFiles(temporaryFile, entityTagFile)
             }
             throw exception
         } catch (exception: Exception) {
@@ -164,7 +205,7 @@ class AppUpdateRepository(
                     UpdateDownloadProgress(downloadedBytes, totalBytes)
                 )
             }
-            temporaryFile.delete()
+            deletePartialDownloadFiles(temporaryFile, entityTagFile)
             if (!coroutineContext.isActive) {
                 throw CancellationException()
             }
@@ -200,10 +241,11 @@ class AppUpdateRepository(
      * @param update 当前下载的更新清单，用于定位受限的缓存文件名
      */
     fun deletePartialUpdate(update: AppUpdateManifest) {
-        File(
-            File(appContext.cacheDir, UPDATE_CACHE_DIRECTORY),
-            "MyRoutin-${update.versionCode}.download"
-        ).delete()
+        val updateDirectory = File(appContext.cacheDir, UPDATE_CACHE_DIRECTORY)
+        deletePartialDownloadFiles(
+            temporaryFile = File(updateDirectory, "MyRoutin-${update.versionCode}.download"),
+            entityTagFile = File(updateDirectory, "MyRoutin-${update.versionCode}.etag")
+        )
     }
 
     /** 用户关闭手动检查提示或再次发起检查时，立即中断尚未完成的清单请求。 */
@@ -248,9 +290,15 @@ class AppUpdateRepository(
     /**
      * 为清单和 APK 建立统一网络连接，避免更新流程散落硬编码超时与请求头。
      * @param url 更新清单或 APK 的 HTTPS 地址
+     * @param rangeStartBytes 断点续传请求的起始字节，完整请求时为 0
+     * @param entityTag 旧分片对应的强 ETag，仅用于 If-Range
      * @return 已设置超时和 GitHub User-Agent 的连接
      */
-    private fun openConnection(url: String, rangeStartBytes: Long = 0L): HttpURLConnection {
+    private fun openConnection(
+        url: String,
+        rangeStartBytes: Long = 0L,
+        entityTag: String? = null
+    ): HttpURLConnection {
         return (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MILLIS
@@ -260,8 +308,116 @@ class AppUpdateRepository(
             setRequestProperty("User-Agent", "MyRoutin/${BuildConfig.VERSION_NAME}")
             if (rangeStartBytes > 0L) {
                 setRequestProperty(RANGE_HEADER, "bytes=$rangeStartBytes-")
+                entityTag?.let { setRequestProperty(IF_RANGE_HEADER, it) }
             }
         }
+    }
+
+    /**
+     * 校验断点响应确实从本地文件末尾开始，并在存在强 ETag 时确认仍是同一个远端实体。
+     * @param connection 当前返回 HTTP 206 的下载连接
+     * @param update 当前更新清单，用于核对已知的 APK 总字节数
+     * @param resumeBytes 本地临时文件当前长度
+     * @param cachedEntityTag 本地分片记录的强 ETag
+     * @return 当前响应能否安全追加到已有分片
+     */
+    private fun isValidResumeResponse(
+        connection: HttpURLConnection,
+        update: AppUpdateManifest,
+        resumeBytes: Long,
+        cachedEntityTag: String?
+    ): Boolean {
+        val contentRange = parseContentRange(connection.getHeaderField(CONTENT_RANGE_HEADER))
+            ?: return false
+        if (contentRange.startByte != resumeBytes) {
+            return false
+        }
+        if (update.apkSizeBytes != null && contentRange.totalBytes != update.apkSizeBytes) {
+            return false
+        }
+        if (cachedEntityTag != null) {
+            val responseEntityTag = normalizeStrongEntityTag(connection.getHeaderField(ENTITY_TAG_HEADER))
+            if (responseEntityTag != cachedEntityTag) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * 解析 HTTP 字节范围，拒绝倒序、越过总大小或无法转换为 Long 的响应头。
+     * @param headerValue 服务端返回的 Content-Range
+     * @return 通过结构和边界校验的字节范围
+     */
+    private fun parseContentRange(headerValue: String?): HttpByteContentRange? {
+        val matchResult = headerValue
+            ?.trim()
+            ?.let(CONTENT_RANGE_PATTERN::matchEntire)
+            ?: return null
+        val startByte = matchResult.groupValues[1].toLongOrNull() ?: return null
+        val endByte = matchResult.groupValues[2].toLongOrNull() ?: return null
+        val rawTotalBytes = matchResult.groupValues[3]
+        val totalBytes = if (rawTotalBytes == UNKNOWN_CONTENT_RANGE_TOTAL) {
+            null
+        } else {
+            rawTotalBytes.toLongOrNull() ?: return null
+        }
+        if (
+            endByte < startByte ||
+            (totalBytes != null && (totalBytes <= 0L || endByte >= totalBytes))
+        ) {
+            return null
+        }
+        return HttpByteContentRange(
+            startByte = startByte,
+            endByte = endByte,
+            totalBytes = totalBytes
+        )
+    }
+
+    /**
+     * 只接受长度受限且不含换行的强 ETag，弱校验器不能用于 If-Range 字节续传。
+     * @param rawEntityTag 响应头或本地文件中的原始 ETag
+     * @return 可安全写入请求头的强 ETag
+     */
+    private fun normalizeStrongEntityTag(rawEntityTag: String?): String? {
+        val entityTag = rawEntityTag?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return entityTag.takeIf {
+            it.length <= MAX_ENTITY_TAG_LENGTH &&
+                !it.startsWith(WEAK_ENTITY_TAG_PREFIX, ignoreCase = true) &&
+                it.startsWith(ENTITY_TAG_QUOTE) &&
+                it.endsWith(ENTITY_TAG_QUOTE) &&
+                !it.contains('\r') &&
+                !it.contains('\n')
+        }
+    }
+
+    /** 读取旧分片的强 ETag；文件损坏时删除校验器并退化为仅校验 Content-Range。 */
+    private fun readCachedEntityTag(entityTagFile: File): String? {
+        val entityTag = runCatching { entityTagFile.readText() }
+            .getOrNull()
+            .let(::normalizeStrongEntityTag)
+        if (entityTag == null) {
+            entityTagFile.delete()
+        }
+        return entityTag
+    }
+
+    /** 将当前响应的强 ETag 与分片配套保存；无有效校验器时清理旧文件。 */
+    private fun persistResponseEntityTag(connection: HttpURLConnection, entityTagFile: File) {
+        val entityTag = normalizeStrongEntityTag(connection.getHeaderField(ENTITY_TAG_HEADER))
+        if (entityTag == null) {
+            entityTagFile.delete()
+            return
+        }
+        runCatching { entityTagFile.writeText(entityTag) }
+            .onFailure { entityTagFile.delete() }
+    }
+
+    /** 暂停以外的退出路径同时删除 APK 分片和实体校验器，禁止下次使用孤立状态续传。 */
+    private fun deletePartialDownloadFiles(temporaryFile: File, entityTagFile: File) {
+        temporaryFile.delete()
+        entityTagFile.delete()
     }
 
     /**
@@ -325,20 +481,41 @@ class AppUpdateRepository(
         private const val UPDATE_CACHE_DIRECTORY = "updates"
         private const val SHA_256_ALGORITHM = "SHA-256"
         private const val RANGE_HEADER = "Range"
+        private const val IF_RANGE_HEADER = "If-Range"
         private const val CONTENT_RANGE_HEADER = "Content-Range"
-        private const val CONTENT_RANGE_SEPARATOR = "/"
+        private const val ENTITY_TAG_HEADER = "ETag"
+        private const val ENTITY_TAG_QUOTE = "\""
+        private const val WEAK_ENTITY_TAG_PREFIX = "W/"
+        private const val UNKNOWN_CONTENT_RANGE_TOTAL = "*"
         private const val CONNECT_TIMEOUT_MILLIS = 10_000
         private const val READ_TIMEOUT_MILLIS = 15_000
         private const val DOWNLOAD_BUFFER_SIZE = 8 * 1024
         private const val PROGRESS_REPORT_INTERVAL_BYTES = 64 * 1024L
+        private const val MAX_ENTITY_TAG_LENGTH = 256
         private const val INVALID_VERSION_CODE = -1
         private const val INVALID_APK_SIZE = -1L
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_PARTIAL_CONTENT = 206
         private val HTTP_SUCCESS_RANGE = 200..299
         private val SHA_256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
+        private val CONTENT_RANGE_PATTERN = Regex(
+            pattern = "^bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)$",
+            option = RegexOption.IGNORE_CASE
+        )
     }
 }
+
+/**
+ * 说明：通过校验的 HTTP 字节响应范围，供断点起点和远端文件总大小核对使用。
+ *
+ * @作者 huangssh
+ * @版本 2.3
+ */
+private data class HttpByteContentRange(
+    val startByte: Long,
+    val endByte: Long,
+    val totalBytes: Long?
+)
 
 /**
  * 说明：更新清单中经过校验的稳定版本信息，是下载、展示与安装流程共同使用的业务对象。

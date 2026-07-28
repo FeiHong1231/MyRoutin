@@ -212,6 +212,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
      * @param state 当前页面的完整渲染状态
      */
     private fun renderPage(state: PlanUsageUiState) {
+        val isLocalDataReady = !state.isLoadingLocalData
         binding.tvKeyCount.text = "我的 Key（${state.planKeys.size}）"
         binding.tvRefreshStatus.text = when {
             state.isRefreshingAll -> "刷新中 ${state.refreshCurrentIndex}/${state.refreshTotalCount}"
@@ -223,13 +224,17 @@ class PlanUsageInputActivity : AppCompatActivity() {
         } else {
             View.VISIBLE
         }
-        binding.btnAddKey.isEnabled = !state.isRefreshingAll
+        binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll
         binding.btnAddKey.text = if (state.isAddKeyPanelVisible) "收起" else "添加 Key"
-        binding.btnRefreshAll.isEnabled = state.planKeys.isNotEmpty() && !state.isRefreshingAll
+        binding.btnRefreshAll.isEnabled =
+            isLocalDataReady &&
+            state.planKeys.isNotEmpty() &&
+            !state.isAddingKey &&
+            !state.isRefreshingAll
         binding.btnRefreshAll.text = if (state.isRefreshingAll) "刷新中..." else "刷新全部"
-        binding.btnQueryAndAdd.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        binding.btnQueryAndAdd.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
         binding.btnQueryAndAdd.text = if (state.isAddingKey) "查询中..." else "查询并添加"
-        binding.btnPasteKey.isEnabled = !state.isAddingKey && !state.isRefreshingAll
+        binding.btnPasteKey.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
         binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
         binding.tvLocalDataWarning.text = state.localDataWarningMessage.orEmpty()
         binding.tvLocalDataWarning.visibility = if (state.localDataWarningMessage.isNullOrBlank()) {
@@ -237,7 +242,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         } else {
             View.VISIBLE
         }
-        binding.tvEmptyHint.visibility = if (state.planKeys.isEmpty()) View.VISIBLE else View.GONE
+        binding.tvEmptyHint.visibility = if (isLocalDataReady && state.planKeys.isEmpty()) View.VISIBLE else View.GONE
         binding.rvPlanKeys.visibility = if (state.planKeys.isEmpty()) View.GONE else View.VISIBLE
         planUsageKeyAdapter.submit(state.planKeys, state.refreshingKeyIds, state.latestErrorByKeyId)
     }

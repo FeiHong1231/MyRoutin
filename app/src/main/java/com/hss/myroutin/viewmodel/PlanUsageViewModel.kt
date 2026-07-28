@@ -8,14 +8,19 @@ import com.hss.myroutin.repository.PlanUsageQueryResult
 import com.hss.myroutin.repository.PlanUsageRepository
 import com.hss.myroutin.store.PlanUsageKeyStore
 import com.hss.myroutin.store.PlanUsageKeyLoadResult
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -26,50 +31,47 @@ import java.util.UUID
  */
 class PlanUsageViewModel(application: Application) : AndroidViewModel(application) {
 
-    /** Key 与缓存始终通过本机加密存储读写，页面层不直接接触 SharedPreferences。 */
-    private val keyStore = PlanUsageKeyStore(application)
+    /** 延迟到 IO 线程首次访问时创建存储，避免初始化 SharedPreferences 时占用页面启动主线程。 */
+    private val keyStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        PlanUsageKeyStore(getApplication<Application>())
+    }
 
     /** 网络请求与接口 JSON 映射由 Repository 处理，ViewModel 只消费查询结果。 */
     private val repository = PlanUsageRepository()
 
-    /** 首次读取结果保留异常语义，避免把不可解密的缓存误认为新用户的空列表。 */
-    private val keyLoadResult = keyStore.loadKeys()
-
     /** 内存中的完整 Key 集合是排序、更新与写回存储时的唯一数据源。 */
-    private val savedPlanKeys: MutableList<SavedPlanKey> = when (keyLoadResult) {
-        is PlanUsageKeyLoadResult.Loaded -> keyLoadResult.keys.toMutableList()
-        PlanUsageKeyLoadResult.Empty,
-        PlanUsageKeyLoadResult.Unreadable -> mutableListOf()
-    }
+    private val savedPlanKeys = mutableListOf<SavedPlanKey>()
 
     /** 仅当前页面会话使用的刷新失败信息，不写入本机缓存。 */
     private val latestErrorByKeyId = mutableMapOf<String, String>()
 
-    private val _uiState = MutableStateFlow(
-        PlanUsageUiState(
-            planKeys = sortedPlanKeys(),
-            isAddKeyPanelVisible = savedPlanKeys.isEmpty(),
-            localDataWarningMessage = when (keyLoadResult) {
-                PlanUsageKeyLoadResult.Unreadable -> UNREADABLE_LOCAL_DATA_WARNING
-                else -> null
-            }
-        )
-    )
+    /** 保存任务串行消费最新列表快照，避免连续操作并发加密或让旧数据晚于新数据落盘。 */
+    private var planKeysPersistenceJob: Job? = null
+
+    /** 保存期间出现的新快照会覆盖尚未处理的旧快照，用于合并短时间内的重复整表写入。 */
+    private var pendingPlanKeysSnapshot: List<SavedPlanKey>? = null
+
+    private val _uiState = MutableStateFlow(PlanUsageUiState(isLoadingLocalData = true))
 
     /** 页面持续观察的不可变状态，旋转页面时由新的 Activity 重新渲染。 */
     val uiState: StateFlow<PlanUsageUiState> = _uiState.asStateFlow()
 
-    private val _events = MutableSharedFlow<PlanUsageUiEvent>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
+    /** 页面重建期间暂存一次性副作用，确保查询完成事件由下一个前台页面消费一次。 */
+    private val eventChannel = Channel<PlanUsageUiEvent>(capacity = Channel.UNLIMITED)
 
     /** 键盘、Toast、滚动等一次性 UI 副作用，不混入可恢复页面状态。 */
-    val events: SharedFlow<PlanUsageUiEvent> = _events.asSharedFlow()
+    val events: Flow<PlanUsageUiEvent> = eventChannel.receiveAsFlow()
+
+    init {
+        loadSavedPlanKeys()
+    }
 
     /**
      * 展开或收起添加面板；刷新期间禁止改变输入区状态，避免新增请求与批量刷新状态交错。
      */
     fun toggleAddKeyPanel() {
         updateUiState { state ->
-            if (state.isRefreshingAll) {
+            if (state.isLoadingLocalData || state.isRefreshingAll) {
                 state
             } else {
                 state.copy(isAddKeyPanelVisible = !state.isAddKeyPanelVisible)
@@ -85,7 +87,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     fun queryAndAddPlanKey(rawName: String, rawApiKey: String) {
         val apiKey = rawApiKey.trim()
         val state = _uiState.value
-        if (state.isAddingKey || state.isRefreshingAll) {
+        if (state.isLoadingLocalData || state.isAddingKey || state.isRefreshingAll) {
             return
         }
         if (apiKey.isBlank()) {
@@ -129,13 +131,13 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
                 cachedUsage = usage
             )
             savedPlanKeys.add(addedKey)
-            keyStore.saveKeys(savedPlanKeys)
+            schedulePlanKeysPersistence()
             publishPlanKeys { current ->
                 current.copy(
                     isAddingKey = false,
                     isAddKeyPanelVisible = false,
                     refreshStatusText = null,
-                    // 新 Key 已成功加密写入，旧的异常密文已被覆盖，无需继续保留恢复提示。
+                    // 新 Key 已提交加密保存，后续保存任务会用最新快照覆盖旧的异常密文。
                     localDataWarningMessage = null
                 )
             }
@@ -146,11 +148,16 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * 按当前排序顺序串行刷新全部 Key，避免多 Key 同时请求导致接口压力或卡片状态错位。
+     * 按当前排序顺序串行刷新全部 Key；添加请求期间拒绝刷新，避免两个任务交错修改列表。
      */
     fun refreshAllPlanKeys() {
         val currentState = _uiState.value
-        if (savedPlanKeys.isEmpty() || currentState.isRefreshingAll) {
+        if (
+            currentState.isLoadingLocalData ||
+            currentState.isAddingKey ||
+            savedPlanKeys.isEmpty() ||
+            currentState.isRefreshingAll
+        ) {
             return
         }
         val refreshQueue = sortedPlanKeys()
@@ -166,18 +173,27 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         }
         sendEvent(PlanUsageUiEvent.HideKeyboard)
         viewModelScope.launch {
-            refreshQueue.forEachIndexed { index, planKey ->
-                updateUiState { state ->
-                    state.copy(
-                        refreshCurrentIndex = index + 1,
-                        refreshingKeyIds = state.refreshingKeyIds + planKey.id
-                    )
+            // 仅成功结果会改变持久数据，失败提示仍只保留在当前页面会话。
+            var hasPersistentChanges = false
+            try {
+                refreshQueue.forEachIndexed { index, planKey ->
+                    updateUiState { state ->
+                        state.copy(
+                            refreshCurrentIndex = index + 1,
+                            refreshingKeyIds = state.refreshingKeyIds + planKey.id
+                        )
+                    }
+                    val requestTrace = "[$refreshTraceId] ${index + 1}/${refreshQueue.size} ${planKey.name}"
+                    val result = repository.queryPlanUsage(planKey.apiKey, requestTrace)
+                    hasPersistentChanges = applyRefreshResult(planKey.id, result) || hasPersistentChanges
+                    publishPlanKeys { state ->
+                        state.copy(refreshingKeyIds = state.refreshingKeyIds - planKey.id)
+                    }
                 }
-                val requestTrace = "[$refreshTraceId] ${index + 1}/${refreshQueue.size} ${planKey.name}"
-                val result = repository.queryPlanUsage(planKey.apiKey, requestTrace)
-                applyRefreshResult(planKey.id, result)
-                publishPlanKeys { state ->
-                    state.copy(refreshingKeyIds = state.refreshingKeyIds - planKey.id)
+            } finally {
+                if (hasPersistentChanges) {
+                    // 批量刷新只提交最终列表快照；任务中断时也保留已经成功刷新的数据。
+                    schedulePlanKeysPersistence()
                 }
             }
             updateUiState {
@@ -190,11 +206,11 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * 切换一张 Key 卡片的详情展开状态，并立即写入本机加密存储。
+     * 切换一张 Key 卡片的详情展开状态，并立即提交本机加密保存任务。
      * @param keyId 需要更新的 Key ID
      */
     fun togglePlanKeyExpansion(keyId: String) {
-        if (_uiState.value.isRefreshingAll) {
+        if (_uiState.value.isLoadingLocalData || _uiState.value.isRefreshingAll) {
             return
         }
         updatePlanKey(keyId) { it.copy(isExpanded = !it.isExpanded) }
@@ -206,7 +222,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      * @param moveOffset 上移为 -1，下移为 1
      */
     fun movePlanKeyByOne(keyId: String, moveOffset: Int) {
-        if (_uiState.value.isRefreshingAll) {
+        if (_uiState.value.isLoadingLocalData || _uiState.value.isRefreshingAll) {
             return
         }
         val orderedKeys = sortedPlanKeys()
@@ -224,7 +240,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         }
         savedPlanKeys[currentIndex] = currentKey.copy(sortOrder = targetKey.sortOrder)
         savedPlanKeys[targetIndex] = targetKey.copy(sortOrder = currentKey.sortOrder)
-        keyStore.saveKeys(savedPlanKeys)
+        schedulePlanKeysPersistence()
         publishPlanKeys()
     }
 
@@ -235,7 +251,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun renamePlanKey(keyId: String, rawName: String) {
         val name = rawName.trim()
-        if (name.isBlank() || _uiState.value.isRefreshingAll) {
+        if (name.isBlank() || _uiState.value.isLoadingLocalData || _uiState.value.isRefreshingAll) {
             return
         }
         updatePlanKey(keyId) { it.copy(name = name) }
@@ -246,7 +262,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      * @param keyId 需要删除的 Key ID
      */
     fun deletePlanKey(keyId: String) {
-        if (_uiState.value.isRefreshingAll) {
+        if (_uiState.value.isLoadingLocalData || _uiState.value.isRefreshingAll) {
             return
         }
         val index = savedPlanKeys.indexOfFirst { it.id == keyId }
@@ -255,7 +271,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         }
         savedPlanKeys.removeAt(index)
         latestErrorByKeyId.remove(keyId)
-        keyStore.saveKeys(savedPlanKeys)
+        schedulePlanKeysPersistence()
         publishPlanKeys { state ->
             state.copy(isAddKeyPanelVisible = savedPlanKeys.isEmpty())
         }
@@ -277,7 +293,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * 更新一项 Key 后写入加密存储，再发布新状态，避免 UI 与本地数据出现不同步。
+     * 更新一项 Key 后发布新状态，并将完整快照交给串行 IO 任务加密保存。
      * @param keyId 需要更新的 Key ID
      * @param transform 基于旧条目生成新条目的变换
      */
@@ -287,7 +303,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         savedPlanKeys[index] = transform(savedPlanKeys[index])
-        keyStore.saveKeys(savedPlanKeys)
+        schedulePlanKeysPersistence()
         publishPlanKeys()
     }
 
@@ -295,19 +311,20 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      * 成功刷新才覆盖缓存，失败时保留旧额度并记录本次页面会话内的错误提示。
      * @param keyId 本次请求对应的 Key ID
      * @param result Repository 返回的查询结果
+     * @return 是否产生了需要写入本机缓存的数据变化
      */
-    private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult) {
+    private fun applyRefreshResult(keyId: String, result: PlanUsageQueryResult): Boolean {
         val usage = when (result) {
             is PlanUsageQueryResult.Failure -> {
                 latestErrorByKeyId[keyId] = result.error.userMessage
-                return
+                return false
             }
             is PlanUsageQueryResult.Success -> result.usage
         }
         latestErrorByKeyId.remove(keyId)
         val index = savedPlanKeys.indexOfFirst { it.id == keyId }
         if (index < 0) {
-            return
+            return false
         }
         val planKey = savedPlanKeys[index]
         savedPlanKeys[index] = planKey.copy(
@@ -320,7 +337,51 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             cachedWeekWindowEndAt = usage?.weekWindowEndAt ?: planKey.cachedWeekWindowEndAt,
             cachedUsage = usage
         )
-        keyStore.saveKeys(savedPlanKeys)
+        return true
+    }
+
+    /**
+     * 在 IO 线程读取并解密本地 Key，读取完成前页面禁止编辑，避免空内存状态覆盖真实缓存。
+     */
+    private fun loadSavedPlanKeys() {
+        viewModelScope.launch {
+            val keyLoadResult = withContext(Dispatchers.IO) {
+                keyStore.loadKeys()
+            }
+            if (keyLoadResult is PlanUsageKeyLoadResult.Loaded) {
+                savedPlanKeys.addAll(keyLoadResult.keys)
+            }
+            publishPlanKeys { state ->
+                state.copy(
+                    isLoadingLocalData = false,
+                    isAddKeyPanelVisible = savedPlanKeys.isEmpty(),
+                    localDataWarningMessage = when (keyLoadResult) {
+                        PlanUsageKeyLoadResult.Unreadable -> UNREADABLE_LOCAL_DATA_WARNING
+                        else -> null
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * 复制当前内存数据并提交保存；同一时刻只运行一个加密写入任务，等待中的快照仅保留最新版本。
+     */
+    private fun schedulePlanKeysPersistence() {
+        pendingPlanKeysSnapshot = savedPlanKeys.toList()
+        if (planKeysPersistenceJob?.isActive == true) {
+            return
+        }
+        planKeysPersistenceJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            while (true) {
+                val planKeysSnapshot = pendingPlanKeysSnapshot ?: break
+                pendingPlanKeysSnapshot = null
+                // 页面立即退出时也要完成已经提交的敏感数据写入，但实际加密仍只在 IO 线程执行。
+                withContext(NonCancellable + Dispatchers.IO) {
+                    keyStore.saveKeys(planKeysSnapshot)
+                }
+            }
+        }
     }
 
     /** 将内存数据源和错误信息投影为可观察的页面状态。 */
@@ -341,14 +402,13 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update(transform)
     }
 
-    /** 发送只应消费一次的 UI 副作用；无订阅页面时无需为历史事件保留重放值。 */
+    /** 将一次性副作用写入缓冲通道，页面短暂重建时由新的订阅者继续消费。 */
     private fun sendEvent(event: PlanUsageUiEvent) {
-        _events.tryEmit(event)
+        eventChannel.trySend(event)
     }
 
     private companion object {
         private const val ADD_KEY_REQUEST_TRACE = "[添加 Key]"
-        private const val EVENT_BUFFER_CAPACITY = 4
         private const val UNREADABLE_LOCAL_DATA_WARNING =
             "本机加密数据无法读取，可能来自其他设备或已失效。为保护 API Key，已忽略该数据；请重新添加 Key。"
     }
@@ -364,6 +424,8 @@ data class PlanUsageUiState(
     val planKeys: List<SavedPlanKey> = emptyList(),
     val refreshingKeyIds: Set<String> = emptySet(),
     val latestErrorByKeyId: Map<String, String> = emptyMap(),
+    /** 本地密文完成读取前禁止页面编辑，防止初始空状态覆盖设备上已经保存的数据。 */
+    val isLoadingLocalData: Boolean = false,
     val isAddKeyPanelVisible: Boolean = false,
     val isAddingKey: Boolean = false,
     val isRefreshingAll: Boolean = false,

@@ -16,6 +16,7 @@ import com.hss.myroutin.R
 import com.hss.myroutin.databinding.ItemPlanUsageKeyBinding
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.widget.QuotaProgressDrawable
 import java.text.DateFormat
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
@@ -393,7 +394,7 @@ class PlanUsageKeyAdapter(
     }
 
     /**
-     * 将已用比例转换为系统控件的千分位进度，并按预警状态切换进度 Drawable。
+     * 将已用比例转换为系统控件的千分位进度，并按预警状态创建自适应进度 Drawable。
      * @param progressBar 当前额度对应的系统进度控件
      * @param usedRate 当前已用比例
      * @param isWarning 是否展示红橙预警渐变
@@ -404,13 +405,7 @@ class PlanUsageKeyAdapter(
         isWarning: Boolean
     ) {
         val progressRate = (usedRate ?: 0.0).coerceIn(0.0, 1.0).toFloat()
-        progressBar.progressDrawable = progressBar.context.getDrawable(
-            if (isWarning) {
-                R.drawable.progress_plan_usage_quota_warning
-            } else {
-                R.drawable.progress_plan_usage_quota_normal
-            }
-        )
+        progressBar.progressDrawable = QuotaProgressDrawable(progressBar.context, isWarning)
         progressBar.progress = (progressRate * PROGRESS_MAX).roundToInt()
     }
 

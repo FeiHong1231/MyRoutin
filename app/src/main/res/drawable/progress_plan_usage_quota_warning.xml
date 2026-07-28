@@ -4,9 +4,10 @@
         android:id="@android:id/background"
         android:drawable="@drawable/bg_plan_usage_progress_track" />
     <item android:id="@android:id/progress">
-        <clip
-            android:clipOrientation="horizontal"
+        <scale
             android:drawable="@drawable/bg_plan_usage_progress_warning"
-            android:gravity="start" />
+            android:scaleGravity="start"
+            android:scaleWidth="100%"
+            android:useIntrinsicSizeAsMinimum="false" />
     </item>
 </layer-list>

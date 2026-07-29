@@ -24,4 +24,17 @@
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:forceDarkAllowed">false</item>
     </style>
+
+    <!-- 升级弹窗的操作色必须避开页面主色，避免深蓝文字落在深色表面后难以辨认。 -->
+    <style name="Theme.MyRoutin.UpdateAlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_primary</item>
+        <item name="colorSecondary">@color/plan_usage_brand_primary</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_primary</item>
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
+    </style>
 </resources>

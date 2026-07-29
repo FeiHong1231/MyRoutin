@@ -245,7 +245,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) {
             return
         }
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.Theme_MyRoutin_UpdateAlertDialog)
             .setTitle(
                 getString(
                     R.string.update_downloaded_title,
@@ -287,7 +287,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
 
     /** 用户只有在点击安装时才看到授权说明，避免在普通更新检查过程中打扰用户。 */
     private fun showInstallPermissionDialog() {
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.Theme_MyRoutin_UpdateAlertDialog)
             .setTitle(R.string.update_install_permission_title)
             .setMessage(R.string.update_install_permission_message)
             .setNegativeButton(R.string.action_cancel, null)

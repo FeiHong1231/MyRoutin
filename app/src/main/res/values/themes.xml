@@ -13,4 +13,13 @@
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <!-- Customize your theme here. -->
     </style>
+
+    <!-- 升级弹窗单独使用品牌深蓝作为操作色，保证浅色模式下按钮文字保持清晰。 -->
+    <style name="Theme.MyRoutin.UpdateAlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_variant</item>
+        <item name="colorSecondary">@color/plan_usage_brand_variant</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_variant</item>
+        <item name="colorAccent">@color/plan_usage_brand_variant</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_variant</item>
+    </style>
 </resources>

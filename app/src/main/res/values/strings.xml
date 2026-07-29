@@ -39,6 +39,10 @@
 
     <string name="plan_usage_clipboard_empty">剪贴板为空</string>
     <string name="plan_usage_pasted">已粘贴</string>
+    <string name="plan_usage_copy_key">复制完整 Key</string>
+    <string name="plan_usage_clipboard_key_label">订阅 Key</string>
+    <string name="plan_usage_key_copied">Key 已复制</string>
+    <string name="plan_usage_copy_failed">无法访问剪贴板</string>
     <string name="plan_usage_refresh_all_running">正在刷新全部 Key</string>
     <string name="plan_usage_move_up">上移一位</string>
     <string name="plan_usage_move_down">下移一位</string>

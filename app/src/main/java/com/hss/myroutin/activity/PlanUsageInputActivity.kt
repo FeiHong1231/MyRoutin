@@ -1,6 +1,7 @@
 package com.hss.myroutin.activity
 
 import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.Context
 import android.os.Bundle
 import android.view.Menu
@@ -110,7 +111,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
     private fun initializePage() {
         planUsageKeyAdapter = PlanUsageKeyAdapter(
             onTogglePlanKey = viewModel::togglePlanKeyExpansion,
-            onManagePlanKey = ::showPlanKeyMenu
+            onManagePlanKey = ::showPlanKeyMenu,
+            onCopyPlanKey = ::copyPlanKey
         )
         pageRenderer = PlanUsagePageRenderer(binding, planUsageKeyAdapter)
         appUpdateCardRenderer = AppUpdateCardRenderer(binding)
@@ -205,6 +207,22 @@ class PlanUsageInputActivity : AppCompatActivity() {
         binding.etApiKey.setText(clipText)
         binding.etApiKey.setSelection(clipText.length)
         MyToastD.show(getString(R.string.plan_usage_pasted))
+    }
+
+    /**
+     * 将卡片中脱敏展示的完整 Key 写入剪贴板，避免用户手动输入敏感凭据。
+     * @param planKey 用户点击复制的本地订阅 Key
+     */
+    private fun copyPlanKey(planKey: SavedPlanKey) {
+        val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (clipboardManager == null) {
+            MyToastD.show(getString(R.string.plan_usage_copy_failed))
+            return
+        }
+        clipboardManager.setPrimaryClip(
+            ClipData.newPlainText(getString(R.string.plan_usage_clipboard_key_label), planKey.apiKey)
+        )
+        MyToastD.show(getString(R.string.plan_usage_key_copied))
     }
 
     /** 根据当前更新卡片状态开始下载、重试下载，或打开系统安装页。 */

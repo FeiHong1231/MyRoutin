@@ -24,12 +24,14 @@ import kotlin.math.roundToInt
  *
  * @param onTogglePlanKey 展开或收起当前 Key 的交互回调
  * @param onManagePlanKey 打开当前 Key 管理入口的交互回调
+ * @param onCopyPlanKey 将当前完整 Key 写入系统剪贴板的交互回调
  * @作者 huangssh
  * @版本 2.3
  */
 internal class PlanUsageKeyCardBinder(
     private val onTogglePlanKey: (String) -> Unit,
-    private val onManagePlanKey: (View, SavedPlanKey) -> Unit
+    private val onManagePlanKey: (View, SavedPlanKey) -> Unit,
+    private val onCopyPlanKey: (SavedPlanKey) -> Unit
 ) {
 
     /**
@@ -57,6 +59,7 @@ internal class PlanUsageKeyCardBinder(
         llKeyHeader.setOnClickListener { onTogglePlanKey(planKey.id) }
         tvToggle.setOnClickListener { onTogglePlanKey(planKey.id) }
         tvManage.setOnClickListener { onManagePlanKey(tvManage, planKey) }
+        btnCopyKey.setOnClickListener { onCopyPlanKey(planKey) }
         if (planKey.isExpanded) {
             bindPlanKeyDetails(cardBinding, planKey)
         }

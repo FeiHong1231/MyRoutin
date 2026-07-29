@@ -12,18 +12,26 @@ import com.hss.myroutin.model.SavedPlanKey
 /**
  * 说明：订阅 Key 卡片列表适配器，只负责列表差量更新、ViewHolder 生命周期和卡片交互回调转发。
  *
+ * @param onTogglePlanKey 展开或收起当前 Key 的交互回调
+ * @param onManagePlanKey 打开当前 Key 管理入口的交互回调
+ * @param onCopyPlanKey 将当前完整 Key 写入系统剪贴板的交互回调
  * @作者 huangssh
  * @版本 2.3
  */
 class PlanUsageKeyAdapter(
     onTogglePlanKey: (String) -> Unit,
-    onManagePlanKey: (View, SavedPlanKey) -> Unit
+    onManagePlanKey: (View, SavedPlanKey) -> Unit,
+    onCopyPlanKey: (SavedPlanKey) -> Unit
 ) : ListAdapter<PlanUsageKeyAdapter.KeyCardItem, PlanUsageKeyAdapter.PlanUsageKeyViewHolder>(
     KEY_CARD_ITEM_DIFF_CALLBACK
 ) {
 
     /** 卡片具体展示逻辑独立于 RecyclerView 生命周期，避免 Adapter 同时承担格式化和绘制职责。 */
-    private val cardBinder = PlanUsageKeyCardBinder(onTogglePlanKey, onManagePlanKey)
+    private val cardBinder = PlanUsageKeyCardBinder(
+        onTogglePlanKey,
+        onManagePlanKey,
+        onCopyPlanKey
+    )
 
     /**
      * 使用当前排序后的 Key 列表更新卡片，刷新态只在本次页面会话内生效。

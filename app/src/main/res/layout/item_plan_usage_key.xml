@@ -87,7 +87,7 @@
                     android:contentDescription="@string/plan_usage_copy_key"
                     android:scaleType="center"
                     android:src="@drawable/ic_plan_usage_copy"
-                    app:tint="@color/plan_usage_brand_primary" />
+                    app:tint="@color/plan_usage_copy_icon" />
             </LinearLayout>
         </LinearLayout>
 

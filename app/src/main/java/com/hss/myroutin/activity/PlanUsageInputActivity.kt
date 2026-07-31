@@ -20,6 +20,7 @@ import com.hss.myroutin.adapter.PlanUsageKeyAdapter
 import com.hss.myroutin.appearance.AppAppearancePreference
 import com.hss.myroutin.appearance.AppearanceMode
 import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
+import com.hss.myroutin.databinding.DialogModelPriceBinding
 import com.hss.myroutin.databinding.DialogRenamePlanKeyBinding
 import com.hss.myroutin.model.SavedPlanKey
 import com.hss.myroutin.update.AppUpdateCardState
@@ -98,6 +99,11 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 true
             }
 
+            R.id.action_model_price -> {
+                showModelPriceDialog()
+                true
+            }
+
             R.id.action_appearance -> {
                 showAppearanceDialog()
                 true
@@ -140,6 +146,26 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 AppAppearancePreference.saveAndApply(this, appearanceModes[which])
             }
             .show()
+    }
+
+    /**
+     * 展示固定的模型价格排行，帮助用户在切换模型前快速比较每 1M Token 的费用。
+     * 价格倍数统一以当前最低价的 luna 模型作为基准，避免与额度查询列表混在一起。
+     */
+    private fun showModelPriceDialog() {
+        val dialogBinding = DialogModelPriceBinding.inflate(layoutInflater)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogBinding.root)
+            .create()
+        dialogBinding.btnClose.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+        // 表格列需要稳定的横向空间，同时限制平板上的弹窗宽度避免内容过度拉伸。
+        val maxDialogWidth = (resources.displayMetrics.density * 560).toInt()
+        val preferredDialogWidth = (resources.displayMetrics.widthPixels * 0.92f).toInt()
+        dialog.window?.setLayout(
+            minOf(maxDialogWidth, preferredDialogWidth),
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT
+        )
     }
 
     /** 持续渲染 ViewModel 状态，并单独消费键盘、滚动和 Toast 等一次性事件。 */

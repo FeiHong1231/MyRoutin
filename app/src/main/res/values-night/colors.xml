@@ -11,6 +11,7 @@
     <color name="plan_usage_text_primary">#F1F5F9</color>
     <color name="plan_usage_text_secondary">#B5C0CF</color>
     <color name="plan_usage_text_tertiary">#8795A9</color>
+    <color name="plan_usage_divider">#303A4A</color>
     <!-- 深色页面保留品牌蓝，提升低对比背景下复制入口的可见性。 -->
     <color name="plan_usage_copy_icon">@color/plan_usage_brand_primary</color>
     <color name="plan_usage_warning">#FFAC8E</color>

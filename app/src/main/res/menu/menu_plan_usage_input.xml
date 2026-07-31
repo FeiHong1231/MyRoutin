@@ -9,6 +9,12 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_model_price"
+        android:orderInCategory="95"
+        android:title="@string/menu_model_price"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_appearance"
         android:orderInCategory="100"
         android:title="@string/menu_appearance"

@@ -3,12 +3,14 @@
 
     <string name="plan_usage_page_title">订阅 Key 查询</string>
     <string name="menu_check_update">检查更新</string>
+    <string name="menu_model_price">模型价格</string>
     <string name="menu_appearance">外观</string>
     <string name="appearance_follow_system">跟随系统</string>
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>
 
     <string name="action_cancel">取消</string>
+    <string name="action_close">关闭</string>
     <string name="action_save">保存</string>
     <string name="action_delete">删除</string>
     <string name="action_retry">重试</string>
@@ -36,6 +38,27 @@
     <string name="plan_usage_cycle_title">周期订阅</string>
     <string name="plan_usage_resource_title">资源包套餐</string>
     <string name="plan_usage_no_quota_hint">暂无可展示额度</string>
+
+    <string name="model_price_dialog_title">每 1M Token 价格排行（便宜 → 贵）</string>
+    <string name="model_price_header_rank">排名</string>
+    <string name="model_price_header_model">模型</string>
+    <string name="model_price_header_price">价格</string>
+    <string name="model_price_header_relative">相对 luna</string>
+    <string name="model_price_model_luna">5.6-luna</string>
+    <string name="model_price_model_terra">5.6-terra</string>
+    <string name="model_price_model_54">5.4</string>
+    <string name="model_price_model_55">5.5</string>
+    <string name="model_price_model_sol">5.6-sol</string>
+    <string name="model_price_price_luna">$0.2</string>
+    <string name="model_price_price_terra">$2</string>
+    <string name="model_price_price_54">$2.5</string>
+    <string name="model_price_price_55">$5</string>
+    <string name="model_price_price_sol">$5</string>
+    <string name="model_price_multiple_luna">1倍</string>
+    <string name="model_price_multiple_terra">10倍</string>
+    <string name="model_price_multiple_54">12.5倍</string>
+    <string name="model_price_multiple_55">25倍</string>
+    <string name="model_price_multiple_sol">25倍</string>
 
     <string name="plan_usage_clipboard_empty">剪贴板为空</string>
     <string name="plan_usage_pasted">已粘贴</string>

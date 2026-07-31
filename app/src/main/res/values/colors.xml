@@ -17,6 +17,8 @@
     <color name="plan_usage_text_primary">#212121</color>
     <color name="plan_usage_text_secondary">#727272</color>
     <color name="plan_usage_text_tertiary">#999999</color>
+    <!-- 表格行分隔线只承担层级分隔，使用比辅助文字更浅的中性色避免抢占信息焦点。 -->
+    <color name="plan_usage_divider">#E5E7EB</color>
     <!-- 复制图标在浅色页面降为辅助灰，避免与主要操作按钮争夺视觉层级。 -->
     <color name="plan_usage_copy_icon">@color/plan_usage_text_tertiary</color>
     <color name="plan_usage_warning">#FE5D36</color>

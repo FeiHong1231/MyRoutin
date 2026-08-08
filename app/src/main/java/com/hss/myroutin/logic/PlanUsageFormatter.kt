@@ -87,6 +87,13 @@ internal object PlanUsageFormatter {
         return value?.let { DecimalFormat(TOKEN_PATTERN).format(it) } ?: EMPTY_VALUE_PLACEHOLDER
     }
 
+    /** 将模型雷达的 Token 数量转换为百万单位，避免大数挤占效率卡片空间。 */
+    fun formatTokenInMillions(value: Long?): String {
+        return value?.let {
+            "${DecimalFormat(TOKEN_MILLION_PATTERN).format(it / TOKENS_PER_MILLION)}M"
+        } ?: EMPTY_VALUE_PLACEHOLDER
+    }
+
     /** 分组倍率与金额共用最多两位小数的展示精度。 */
     fun formatDecimal(value: Double): String {
         return DecimalFormat(DECIMAL_PATTERN).format(value)
@@ -124,6 +131,8 @@ internal object PlanUsageFormatter {
     private const val DECIMAL_PATTERN = "0.##"
     private const val PERCENT_PATTERN = "0.#"
     private const val TOKEN_PATTERN = "#,###"
+    private const val TOKEN_MILLION_PATTERN = "0.##"
+    private const val TOKENS_PER_MILLION = 1_000_000.0
     private const val BEIJING_TIME_PATTERN = "yyyy-MM-dd HH:mm:ss"
     private const val MILLIS_PER_MINUTE = 60_000L
     private const val MINUTES_PER_HOUR = 60L

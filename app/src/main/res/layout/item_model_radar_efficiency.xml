@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="16dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="16dp"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/bg_plan_usage_panel"
+    android:orientation="vertical"
+    android:paddingStart="14dp"
+    android:paddingTop="10dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="11dp">
+
+    <!-- 顶部色带承担模型分组识别，颜色面积保持克制以适配 App 现有主题。 -->
+    <View
+        android:id="@+id/viewEfficiencyAccent"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:background="@color/plan_usage_brand_primary" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvEfficiencyModelName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            tools:text="5.6-sol" />
+
+        <TextView
+            android:id="@+id/tvEfficiencyEffort"
+            android:layout_width="wrap_content"
+            android:layout_height="26dp"
+            android:layout_marginStart="7dp"
+            android:background="@drawable/bg_plan_usage_card_action"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_brand_primary"
+            android:textSize="11sp"
+            tools:text="ultra" />
+
+        <TextView
+            android:id="@+id/tvEfficiencyRuns"
+            android:layout_width="wrap_content"
+            android:layout_height="24dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_plan_usage_card_action"
+            android:gravity="center"
+            android:paddingStart="7dp"
+            android:paddingEnd="7dp"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_secondary"
+            android:textSize="11sp"
+            tools:text="48" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvEfficiencyIq"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_brand_primary"
+            android:textSize="30sp"
+            android:textStyle="bold"
+            tools:text="104.5" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:gravity="end"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvEfficiencyCost"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textColor="@color/plan_usage_text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                tools:text="$21.36" />
+
+            <TextView
+                android:id="@+id/tvEfficiencyDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:singleLine="true"
+                android:textColor="@color/plan_usage_text_secondary"
+                android:textSize="13sp"
+                tools:text="52分钟" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvEfficiencyDetails"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:textColor="@color/plan_usage_text_tertiary"
+        android:textSize="11sp"
+        tools:text="Agent steps 98.4 · 28.7M Token · 缓存命中 97.3%" />
+</LinearLayout>

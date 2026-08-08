@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/plan_usage_surface"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingTop="16dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="24dp">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:background="@color/plan_usage_divider" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvDetailModelName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            tools:text="5.6-sol" />
+
+        <TextView
+            android:id="@+id/tvDetailEffort"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:background="@drawable/bg_plan_usage_card_action"
+            android:gravity="center"
+            android:paddingStart="9dp"
+            android:paddingEnd="9dp"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_brand_primary"
+            android:textSize="12sp"
+            tools:text="ultra" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvDetailIq"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:singleLine="true"
+        android:textColor="@color/plan_usage_brand_primary"
+        android:textSize="34sp"
+        android:textStyle="bold"
+        tools:text="104.5 IQ" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="14dp"
+        android:background="@color/plan_usage_divider" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/model_radar_metric_cost"
+                android:textColor="@color/plan_usage_text_tertiary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvDetailCost"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/plan_usage_text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                tools:text="$21.36" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/model_radar_metric_duration"
+                android:textColor="@color/plan_usage_text_tertiary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvDetailDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/plan_usage_text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                tools:text="52分钟" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/model_radar_metric_runs"
+                android:textColor="@color/plan_usage_text_tertiary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvDetailRuns"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/plan_usage_text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                tools:text="48" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvDetailSteps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_secondary"
+            android:textSize="12sp"
+            tools:text="Agent steps 98.4" />
+
+        <TextView
+            android:id="@+id/tvDetailTokens"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_secondary"
+            android:textSize="12sp"
+            tools:text="平均 28.7M Token" />
+
+        <TextView
+            android:id="@+id/tvDetailCache"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:textColor="@color/plan_usage_text_secondary"
+            android:textSize="12sp"
+            tools:text="缓存 97.3%" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvDetailSource"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="@string/model_radar_efficiency_detail_source"
+        android:textColor="@color/plan_usage_text_tertiary"
+        android:textSize="11sp" />
+</LinearLayout>

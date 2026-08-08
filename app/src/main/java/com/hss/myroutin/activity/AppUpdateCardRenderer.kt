@@ -2,7 +2,7 @@ package com.hss.myroutin.activity
 
 import android.view.View
 import com.hss.myroutin.R
-import com.hss.myroutin.databinding.ActivityPlanUsageInputBinding
+import com.hss.myroutin.databinding.ViewAppUpdateCardBinding
 import com.hss.myroutin.update.AppUpdateCardState
 import com.hss.myroutin.update.AppUpdateManifest
 import com.hss.myroutin.update.AppUpdateUiState
@@ -11,12 +11,12 @@ import com.hss.myroutin.update.UpdateDownloadProgress
 /**
  * 说明：首页更新卡片渲染器，统一处理检查、下载、暂停、失败和已下载状态的控件展示。
  *
- * @param binding 查询页内更新卡片控件的 ViewBinding
+ * @param binding 用量页和设置页共用的更新卡片 ViewBinding
  * @作者 huangssh
  * @版本 2.3
  */
 internal class AppUpdateCardRenderer(
-    private val binding: ActivityPlanUsageInputBinding
+    private val binding: ViewAppUpdateCardBinding
 ) {
 
     /**
@@ -31,7 +31,7 @@ internal class AppUpdateCardRenderer(
         when (val cardState = state.cardState) {
             AppUpdateCardState.Hidden -> {
                 binding.ucpUpdateProgress.isIndeterminate = false
-                binding.llUpdateCard.visibility = View.GONE
+                binding.root.visibility = View.GONE
             }
 
             is AppUpdateCardState.Available -> {
@@ -99,7 +99,7 @@ internal class AppUpdateCardRenderer(
         isPaused: Boolean
     ) {
         val downloadPercent = calculateDownloadPercent(progress)
-        binding.llUpdateCard.visibility = View.VISIBLE
+        binding.root.visibility = View.VISIBLE
         binding.tvUpdateTitle.text = if (isPaused) {
             binding.root.context.getString(
                 R.string.update_paused_title,
@@ -136,7 +136,7 @@ internal class AppUpdateCardRenderer(
 
     /** 手动检查时明确展示当前请求状态，避免用户只看到“正在处理”却不知道请求是否仍在进行。 */
     private fun showCheckingCard() {
-        binding.llUpdateCard.visibility = View.VISIBLE
+        binding.root.visibility = View.VISIBLE
         binding.tvUpdateTitle.text = binding.root.context.getString(R.string.update_checking_title)
         binding.tvUpdateDetail.text = binding.root.context.getString(R.string.update_checking_detail)
         binding.flUpdateProgress.visibility = View.VISIBLE
@@ -155,7 +155,7 @@ internal class AppUpdateCardRenderer(
      * @param actionText 右侧操作按钮文案
      */
     private fun showActionCard(title: String, detail: String, actionText: String) {
-        binding.llUpdateCard.visibility = View.VISIBLE
+        binding.root.visibility = View.VISIBLE
         binding.tvUpdateTitle.text = title
         binding.tvUpdateDetail.text = detail
         binding.flUpdateProgress.visibility = View.GONE

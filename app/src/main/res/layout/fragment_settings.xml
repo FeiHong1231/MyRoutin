@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/plan_usage_page_background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="16dp"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:singleLine="true"
+            android:text="@string/settings_preference_section"
+            android:textColor="@color/plan_usage_text_secondary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/llAppearanceSetting"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="12dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_settings_appearance"
+                app:tint="@color/plan_usage_text_secondary" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:text="@string/menu_appearance"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tvAppearanceValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:singleLine="true"
+                    android:textColor="@color/plan_usage_text_secondary"
+                    android:textSize="13sp"
+                    tools:text="跟随系统" />
+            </LinearLayout>
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_settings_chevron"
+                app:tint="@color/plan_usage_text_tertiary" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginStart="56dp"
+            android:background="@color/plan_usage_divider" />
+
+        <LinearLayout
+            android:id="@+id/llCheckUpdateSetting"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="12dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_settings_update"
+                app:tint="@color/plan_usage_text_secondary" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:text="@string/menu_check_update"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tvCurrentVersion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:singleLine="true"
+                    android:textColor="@color/plan_usage_text_secondary"
+                    android:textSize="13sp"
+                    tools:text="当前版本 v3.0" />
+            </LinearLayout>
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_settings_chevron"
+                app:tint="@color/plan_usage_text_tertiary" />
+        </LinearLayout>
+
+        <include
+            android:id="@+id/updateCard"
+            layout="@layout/view_app_update_card" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"
+    android:layout_marginStart="16dp"
+    android:layout_marginTop="10dp"
+    android:layout_marginEnd="16dp"
+    android:background="@drawable/bg_plan_usage_panel"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="12dp"
+    android:paddingEnd="8dp">
+
+    <View
+        android:id="@+id/viewEfficiencyGroupAccent"
+        android:layout_width="3dp"
+        android:layout_height="24dp"
+        android:background="@color/plan_usage_brand_primary" />
+
+    <TextView
+        android:id="@+id/tvEfficiencyGroupName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:singleLine="true"
+        android:textColor="@color/plan_usage_text_primary"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        tools:text="5.6-sol" />
+
+    <TextView
+        android:id="@+id/tvEfficiencyGroupMeta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:singleLine="true"
+        android:textColor="@color/plan_usage_text_tertiary"
+        android:textSize="12sp"
+        tools:text="6 个档位" />
+
+    <ImageView
+        android:id="@+id/ivEfficiencyGroupArrow"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_settings_chevron"
+        app:tint="@color/plan_usage_text_tertiary"
+        tools:rotation="90" />
+</LinearLayout>

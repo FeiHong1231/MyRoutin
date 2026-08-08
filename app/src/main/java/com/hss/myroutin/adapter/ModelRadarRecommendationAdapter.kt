@@ -53,7 +53,8 @@ internal class ModelRadarRecommendationAdapter :
                 ?: context.getString(R.string.plan_usage_value_unavailable)
             binding.tvRecommendationScene.text = recommendation.title
             binding.tvRecommendationModel.text = recommendation.modelName
-            binding.tvRecommendationEffort.text = recommendation.effort
+            binding.tvRecommendationEffort.text =
+                PlanUsageFormatter.formatEffortLabel(recommendation.effort)
             binding.tvRecommendationEffort.isVisible = recommendation.effort.isNotBlank()
             binding.tvRecommendationIq.text = context.getString(R.string.model_radar_iq_value, iq)
             binding.tvRecommendationMeta.text = context.getString(

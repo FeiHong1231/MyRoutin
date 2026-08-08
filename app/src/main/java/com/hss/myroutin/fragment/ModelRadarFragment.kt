@@ -1,6 +1,7 @@
 package com.hss.myroutin.fragment
 
 import android.content.Intent
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -16,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.ModelRadarAdapter
@@ -53,6 +55,8 @@ class ModelRadarFragment : Fragment() {
     /** 当前效率页筛选条件只影响展示，不改变缓存中的完整快照。 */
     private var selectedEfficiencyModelId: String? = null
     private var selectedEfficiencyEffort: String? = null
+    /** 智力效率默认直接展示跨模型 IQ 排行，也保留原有模型分组浏览方式。 */
+    private var selectedEfficiencyViewMode = EFFICIENCY_VIEW_MODE_RANKING
     private var efficiencyFilterSignature: String? = null
     private var allEfficiencyPoints: List<ModelRadarEfficiency> = emptyList()
 
@@ -84,6 +88,20 @@ class ModelRadarFragment : Fragment() {
         binding.rvRecommendations.itemAnimator = null
         binding.rvRadarModels.itemAnimator = null
         binding.rvEfficiency.itemAnimator = null
+        /** 横向推荐卡之间保留 8dp，末项保留 16dp 尾部空间以维持列表边界。 */
+        binding.rvRecommendations.addItemDecoration(object : RecyclerView.ItemDecoration() {
+            override fun getItemOffsets(
+                outRect: Rect,
+                view: View,
+                parent: RecyclerView,
+                state: RecyclerView.State
+            ) {
+                val position = parent.getChildAdapterPosition(view)
+                if (position != RecyclerView.NO_POSITION) {
+                    outRect.right = if (position == state.itemCount - 1) 16.dp else 8.dp
+                }
+            }
+        })
         efficiencyAdapter.setOnPointClickListener(::showEfficiencyDetails)
         binding.rgModelRadarTabs.setOnCheckedChangeListener { _, checkedId ->
             val isEfficiency = checkedId == R.id.rbIntelligenceEfficiency
@@ -93,7 +111,8 @@ class ModelRadarFragment : Fragment() {
         binding.btnRefreshEfficiency.setOnClickListener { viewModel.refresh() }
         binding.tvRadarSource.setOnClickListener { openRadarSource() }
         binding.tvEfficiencySource.setOnClickListener { openRadarSource() }
-        binding.pageSwitcher.displayedChild = 0
+        // 顶部默认选中智力效率，ViewFlipper 的第一子页仍是模型雷达，因此映射到第二页。
+        binding.pageSwitcher.displayedChild = 1
     }
 
     /** 页面可见时渲染缓存和刷新状态，切换到其他导航后停止更新 View。 */
@@ -138,7 +157,7 @@ class ModelRadarFragment : Fragment() {
         binding.tvEfficiencyStatus.text = state.statusMessage.orEmpty()
         binding.tvEfficiencyStatus.isVisible = !state.statusMessage.isNullOrBlank()
         binding.tvEfficiencyEmpty.isVisible = !state.isLoading && !hasEfficiency
-        binding.tvEfficiencyTitle.isVisible = hasEfficiency
+        binding.llEfficiencyTitleRow.isVisible = hasEfficiency
         binding.tvEfficiencyMeta.isVisible = hasEfficiency
         binding.tvEfficiencyMeta.text = snapshot?.recentRuns24h?.let { runs24h ->
             getString(R.string.model_radar_efficiency_meta, runs24h)
@@ -179,7 +198,7 @@ class ModelRadarFragment : Fragment() {
     }
 
     /**
-     * 根据当前快照创建横向筛选入口；筛选控件只在模型数据变化时重建，避免刷新状态造成跳动。
+     * 根据当前快照创建浏览模式和横向筛选入口；控件只在数据变化时重建，避免刷新状态造成跳动。
      * @param points 当前快照中的所有效率档位
      */
     private fun setupEfficiencyFilters(points: List<ModelRadarEfficiency>) {
@@ -190,14 +209,36 @@ class ModelRadarFragment : Fragment() {
             .map(ModelRadarEfficiency::effort)
             .distinct()
             .sortedWith(compareBy { EFFORT_ORDER.indexOf(it).coerceAtLeast(0) })
-            .map { it to it }
+            .map { it to PlanUsageFormatter.formatEffortLabel(it) }
         val signature = buildString {
             append(modelOptions.joinToString { it.first })
             append('|')
             append(effortOptions.joinToString { it.first })
         }
-        if (signature == efficiencyFilterSignature) return
+        // 筛选控件属于 Fragment View 生命周期，视图重建后即使签名未变也必须重新填充。
+        if (
+            signature == efficiencyFilterSignature &&
+            binding.llEfficiencyViewModes.childCount > 0 &&
+            binding.llEfficiencyModelFilters.childCount > 0 &&
+            binding.llEfficiencyEffortFilters.childCount > 0
+        ) {
+            return
+        }
         efficiencyFilterSignature = signature
+        addEfficiencyFilterOptions(
+            container = binding.llEfficiencyViewModes,
+            options = listOf(
+                EFFICIENCY_VIEW_MODE_RANKING to
+                    getString(R.string.model_radar_efficiency_view_ranking),
+                EFFICIENCY_VIEW_MODE_GROUPED to
+                    getString(R.string.model_radar_efficiency_view_grouped)
+            ),
+            selectedValue = selectedEfficiencyViewMode,
+            onSelected = { viewMode ->
+                selectedEfficiencyViewMode = viewMode ?: EFFICIENCY_VIEW_MODE_RANKING
+                renderEfficiencyPoints(allEfficiencyPoints)
+            }
+        )
         if (selectedEfficiencyModelId !in modelOptions.map { it.first }) {
             selectedEfficiencyModelId = null
         }
@@ -225,7 +266,7 @@ class ModelRadarFragment : Fragment() {
         )
     }
 
-    /** 将筛选后的效率点交给带分组折叠能力的适配器。 */
+    /** 将筛选后的效率点按当前浏览模式交给排行或分组适配器。 */
     private fun renderEfficiencyPoints(
         points: List<ModelRadarEfficiency>,
         showEmpty: Boolean = true
@@ -234,7 +275,15 @@ class ModelRadarFragment : Fragment() {
             (selectedEfficiencyModelId == null || point.modelId == selectedEfficiencyModelId) &&
                 (selectedEfficiencyEffort == null || point.effort == selectedEfficiencyEffort)
         }
-        efficiencyAdapter.submitPoints(filteredPoints)
+        val rankingPoints = if (selectedEfficiencyViewMode == EFFICIENCY_VIEW_MODE_RANKING) {
+            filteredPoints.sortedWith(EFFICIENCY_RANKING_COMPARATOR)
+        } else {
+            filteredPoints
+        }
+        efficiencyAdapter.submitPoints(
+            values = rankingPoints,
+            showRanking = selectedEfficiencyViewMode == EFFICIENCY_VIEW_MODE_RANKING
+        )
         binding.tvEfficiencyEmpty.isVisible = showEmpty && filteredPoints.isEmpty()
         binding.rvEfficiency.isVisible = filteredPoints.isNotEmpty()
     }
@@ -283,7 +332,7 @@ class ModelRadarFragment : Fragment() {
     private fun showEfficiencyDetails(point: ModelRadarEfficiency) {
         val detailBinding = DialogModelRadarEfficiencyBinding.inflate(layoutInflater)
         detailBinding.tvDetailModelName.text = point.modelName
-        detailBinding.tvDetailEffort.text = point.effort
+        detailBinding.tvDetailEffort.text = PlanUsageFormatter.formatEffortLabel(point.effort)
         detailBinding.tvDetailIq.text = getString(
             R.string.model_radar_efficiency_detail_iq,
             PlanUsageFormatter.formatDecimal(point.iq)
@@ -333,12 +382,33 @@ class ModelRadarFragment : Fragment() {
         binding.rvRecommendations.adapter = null
         binding.rvRadarModels.adapter = null
         binding.rvEfficiency.adapter = null
+        // 动态筛选按钮随 View 一起销毁，避免下次创建页面时复用过期签名而跳过重建。
+        efficiencyFilterSignature = null
         _binding = null
         super.onDestroyView()
     }
 
     private companion object {
         private const val CODEX_RADAR_URL = "https://codexradar.com/"
+        private const val EFFICIENCY_VIEW_MODE_RANKING = "ranking"
+        private const val EFFICIENCY_VIEW_MODE_GROUPED = "grouped"
         private val EFFORT_ORDER = listOf("ultra", "max", "xhigh", "high", "medium", "low")
+        private val EFFICIENCY_MODEL_ORDER = listOf(
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "deepseek-v4-flash"
+        )
+        /** IQ 相同时使用固定模型/档位顺序，避免刷新后同分项无意义地跳动。 */
+        private val EFFICIENCY_RANKING_COMPARATOR = compareByDescending<ModelRadarEfficiency> {
+            it.iq
+        }.thenBy {
+            EFFICIENCY_MODEL_ORDER.indexOf(it.modelId).takeIf { index -> index >= 0 }
+                ?: Int.MAX_VALUE
+        }.thenBy {
+            EFFORT_ORDER.indexOf(it.effort).takeIf { index -> index >= 0 }
+                ?: Int.MAX_VALUE
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.hss.myroutin.adapter
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -14,7 +15,7 @@ import com.hss.myroutin.model.ModelRadarEfficiency
 import kotlin.math.roundToLong
 
 /**
- * 说明：智力效率档位卡片适配器，按官网模型分组顺序展示手机端需要的核心指标。
+ * 说明：智力效率档位卡片适配器，支持跨模型 IQ 排行与原有模型分组两种展示方式。
  *
  * @作者 huangssh
  * @版本 3.0
@@ -24,8 +25,14 @@ internal class ModelRadarEfficiencyAdapter :
         EFFICIENCY_ROW_DIFF_CALLBACK
     ) {
 
-    /** 默认展开主力三组，长尾模型收起，首屏先呈现用户最常比较的结果。 */
-    private val collapsedModelIds = mutableSetOf("gpt-5.5", "deepseek-v4-flash")
+    /** 模型分组默认全部收起，用户点击具体分组后再按需展开，减少首屏纵向占用。 */
+    private val collapsedModelIds = mutableSetOf(
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "deepseek-v4-flash"
+    )
     private var points: List<ModelRadarEfficiency> = emptyList()
     private var onPointClick: ((ModelRadarEfficiency) -> Unit)? = null
 
@@ -43,23 +50,30 @@ internal class ModelRadarEfficiencyAdapter :
     }
 
     /**
-     * 按模型构建可折叠的手机端列表，筛选后仍保持官网的模型与档位顺序。
+     * 构建手机端效率列表；排行模式打平模型组并显示名次，分组模式保留可折叠标题。
      * @param values 当前筛选条件下的效率点
+     * @param showRanking 是否按 IQ 排行并在卡片上显示名次
      */
-    fun submitPoints(values: List<ModelRadarEfficiency>) {
+    fun submitPoints(values: List<ModelRadarEfficiency>, showRanking: Boolean = false) {
         points = values
-        val rows = buildList {
-            values.groupBy(ModelRadarEfficiency::modelId).forEach { (modelId, modelPoints) ->
-                add(
-                    EfficiencyRow.Group(
-                        modelId = modelId,
-                        modelName = modelPoints.first().modelName,
-                        pointCount = modelPoints.size,
-                        expanded = modelId !in collapsedModelIds
+        val rows: List<EfficiencyRow> = if (showRanking) {
+            values.mapIndexed { index, point ->
+                EfficiencyRow.Point(point, rank = index + 1)
+            }
+        } else {
+            buildList<EfficiencyRow> {
+                values.groupBy(ModelRadarEfficiency::modelId).forEach { (modelId, modelPoints) ->
+                    add(
+                        EfficiencyRow.Group(
+                            modelId = modelId,
+                            modelName = modelPoints.first().modelName,
+                            pointCount = modelPoints.size,
+                            expanded = modelId !in collapsedModelIds
+                        )
                     )
-                )
-                if (modelId !in collapsedModelIds) {
-                    modelPoints.forEach { point -> add(EfficiencyRow.Point(point)) }
+                    if (modelId !in collapsedModelIds) {
+                        modelPoints.forEach { point -> add(EfficiencyRow.Point(point)) }
+                    }
                 }
             }
         }
@@ -96,7 +110,7 @@ internal class ModelRadarEfficiencyAdapter :
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val row = getItem(position)) {
             is EfficiencyRow.Group -> (holder as GroupViewHolder).bind(row)
-            is EfficiencyRow.Point -> (holder as PointViewHolder).bind(row.value)
+            is EfficiencyRow.Point -> (holder as PointViewHolder).bind(row.value, row.rank)
         }
     }
 
@@ -134,14 +148,17 @@ internal class ModelRadarEfficiencyAdapter :
         /**
          * 绑定模型档位的核心智力、费用、耗时和运行效率数据。
          * @param point 当前模型档位的聚合指标
+         * @param rank 当前排行名次；模型分组模式下为空
          */
-        fun bind(point: ModelRadarEfficiency) {
+        fun bind(point: ModelRadarEfficiency, rank: Int?) {
             val context = binding.root.context
             binding.viewEfficiencyAccent.setBackgroundColor(
                 ContextCompat.getColor(context, resolveAccent(point.modelId))
             )
+            binding.tvEfficiencyRank.isVisible = rank != null
+            binding.tvEfficiencyRank.text = rank?.let { "#$it" }.orEmpty()
             binding.tvEfficiencyModelName.text = point.modelName
-            binding.tvEfficiencyEffort.text = point.effort
+            binding.tvEfficiencyEffort.text = PlanUsageFormatter.formatEffortLabel(point.effort)
             binding.tvEfficiencyRuns.text = point.recentRuns24h?.let {
                 context.getString(R.string.model_radar_efficiency_runs_short, it)
             } ?: context.getString(R.string.plan_usage_value_unavailable)
@@ -214,7 +231,10 @@ internal class ModelRadarEfficiencyAdapter :
             override val id: String = "group:$modelId"
         }
 
-        data class Point(val value: ModelRadarEfficiency) : EfficiencyRow {
+        data class Point(
+            val value: ModelRadarEfficiency,
+            val rank: Int? = null
+        ) : EfficiencyRow {
             override val id: String = "point:${value.id}"
         }
     }

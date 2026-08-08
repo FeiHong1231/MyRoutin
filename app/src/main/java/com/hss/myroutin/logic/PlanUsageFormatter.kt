@@ -94,6 +94,24 @@ internal object PlanUsageFormatter {
         } ?: EMPTY_VALUE_PLACEHOLDER
     }
 
+    /**
+     * 将 CodexRadar 的英文推理档位转换为中英文并列标签，统一模型卡和效率卡的阅读口径。
+     * @param effort 服务端返回的推理档位标识
+     * @return 可直接展示的中英文档位标签，未知档位保留原始值
+     */
+    fun formatEffortLabel(effort: String?): String {
+        val normalizedEffort = effort?.trim()?.lowercase(Locale.US) ?: return ""
+        return when (normalizedEffort) {
+            "low" -> "low 轻度"
+            "medium" -> "medium 中"
+            "high" -> "high 高"
+            "xhigh" -> "xhigh 极高"
+            "max" -> "max 最高"
+            "ultra" -> "ultra 极高（更快消耗）"
+            else -> effort.orEmpty()
+        }
+    }
+
     /** 分组倍率与金额共用最多两位小数的展示精度。 */
     fun formatDecimal(value: Double): String {
         return DecimalFormat(DECIMAL_PATTERN).format(value)

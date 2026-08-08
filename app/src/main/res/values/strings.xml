@@ -3,7 +3,7 @@
 
     <string name="plan_usage_page_title">订阅 Key 查询</string>
     <string name="navigation_usage">用量</string>
-    <string name="navigation_models">模型</string>
+    <string name="navigation_models">模型数据</string>
     <string name="navigation_settings">设置</string>
     <string name="settings_preference_section">偏好设置</string>
     <string name="settings_current_version">当前版本 v%1$s</string>
@@ -50,6 +50,8 @@
     <string name="model_radar_efficiency_tab_title">智力效率</string>
     <string name="model_radar_efficiency_title">智力效率</string>
     <string name="model_radar_efficiency_meta">近24小时 %1$d 次有效作答 · 每个档位独立统计</string>
+    <string name="model_radar_efficiency_view_ranking">IQ 排行</string>
+    <string name="model_radar_efficiency_view_grouped">模型分组</string>
     <string name="model_radar_efficiency_model_filter">模型</string>
     <string name="model_radar_efficiency_effort_filter">档位</string>
     <string name="model_radar_efficiency_filter_all">全部</string>

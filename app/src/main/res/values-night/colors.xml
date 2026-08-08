@@ -19,7 +19,7 @@
     <color name="plan_usage_danger">#FF958F</color>
     <color name="plan_usage_success">#7ADE93</color>
     <!-- 深色模式提高模型色亮度，确保顶部色带在深色卡片上仍可辨识。 -->
-    <color name="model_radar_sol_accent">#F0B90B</color>
+    <color name="model_radar_sol_accent">#FFB347</color>
     <color name="model_radar_terra_accent">#5794FF</color>
     <color name="model_radar_luna_accent">#A9B7C9</color>
     <color name="model_radar_55_accent">#18C6E4</color>

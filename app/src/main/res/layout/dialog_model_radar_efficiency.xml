@@ -45,7 +45,7 @@
             android:singleLine="true"
             android:textColor="@color/plan_usage_brand_primary"
             android:textSize="12sp"
-            tools:text="ultra" />
+            tools:text="ultra 极高（更快消耗）" />
     </LinearLayout>
 
     <TextView

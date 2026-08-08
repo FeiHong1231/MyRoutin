@@ -48,7 +48,7 @@ internal class ModelRadarAdapter :
             val hasRadarData = model.iq != null
             binding.tvRadarModelName.text = model.name
             binding.tvRadarPrice.text = PlanUsageFormatter.formatUsd(model.inputPriceUsdPerMillion)
-            binding.tvRadarEffort.text = model.bestEffort.orEmpty()
+            binding.tvRadarEffort.text = PlanUsageFormatter.formatEffortLabel(model.bestEffort)
             binding.tvRadarEffort.isVisible = hasRadarData && !model.bestEffort.isNullOrBlank()
             binding.llRadarMetrics.isVisible = hasRadarData
             binding.tvRadarSummary.text = if (hasRadarData) {

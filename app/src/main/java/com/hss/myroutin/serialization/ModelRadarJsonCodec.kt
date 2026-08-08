@@ -130,7 +130,14 @@ internal object ModelRadarJsonCodec {
                     averageDurationMinutes = item.doubleOrNull("averageDurationMinutes")
                 )
             },
-            models = root.optJSONArray("models").objects().map { item -> item.toRadarModel() },
+            // 兼容旧缓存：历史快照可能按旧顺序保存，读取时统一恢复当前展示顺序。
+            models = root.optJSONArray("models").objects()
+                .map { item -> item.toRadarModel() }
+                .sortedWith(compareBy { model ->
+                    DISPLAY_MODEL_IDS.indexOf(model.id).let { index ->
+                        if (index >= 0) index else Int.MAX_VALUE
+                    }
+                }),
             efficiencyPoints = root.optJSONArray("efficiencyPoints").objects()
                 .map { item -> item.toRadarEfficiency() },
             recentRuns24h = root.intOrNull("recentRuns24h"),
@@ -472,13 +479,13 @@ internal object ModelRadarJsonCodec {
     private const val IQ_SCALE = 150.0
     private const val SECONDS_PER_MINUTE = 60.0
 
-    /** 展示顺序延续现有价格页习惯，5.5 固定放在最后。 */
+    /** 展示顺序延续现有价格页习惯，5.4 固定放在最后。 */
     private val DISPLAY_MODEL_IDS = listOf(
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.4",
-        "gpt-5.5"
+        "gpt-5.5",
+        "gpt-5.4"
     )
     /** 效率页按官网当前公开数据展示，包含 DeepSeek，5.4 没有对应公开测量时不造卡片。 */
     private val EFFICIENCY_MODEL_IDS = listOf(

@@ -26,7 +26,7 @@
     <color name="plan_usage_danger">#FF3B30</color>
     <color name="plan_usage_success">#34C759</color>
     <!-- 智力效率卡片按模型分组使用低面积强调色，详情文字仍服从主题语义色。 -->
-    <color name="model_radar_sol_accent">#D99B00</color>
+    <color name="model_radar_sol_accent">#E67E22</color>
     <color name="model_radar_terra_accent">#2771FA</color>
     <color name="model_radar_luna_accent">#75849A</color>
     <color name="model_radar_55_accent">#00A8C6</color>

@@ -84,6 +84,8 @@ class PlanUsageFragment : Fragment() {
         pageRenderer = PlanUsagePageRenderer(binding, planUsageKeyAdapter)
         appUpdateCardRenderer = AppUpdateCardRenderer(binding.updateCard)
         binding.rvPlanKeys.adapter = planUsageKeyAdapter
+        binding.swipeRefreshPlanUsage.setColorSchemeResources(R.color.plan_usage_brand_primary)
+        binding.swipeRefreshPlanUsage.setOnRefreshListener { viewModel.refreshAllPlanKeys() }
         binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
         binding.btnRefreshAll.setOnClickListener { viewModel.refreshAllPlanKeys() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }

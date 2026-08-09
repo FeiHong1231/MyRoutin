@@ -26,6 +26,11 @@ internal class PlanUsagePageRenderer(
     fun render(state: PlanUsageUiState) {
         val context = binding.root.context
         val isLocalDataReady = !state.isLoadingLocalData
+        val canPullToRefresh = isLocalDataReady &&
+            state.planKeys.isNotEmpty() &&
+            !state.isAddingKey
+        binding.swipeRefreshPlanUsage.isEnabled = canPullToRefresh
+        binding.swipeRefreshPlanUsage.isRefreshing = state.isRefreshingAll
         binding.tvKeyCount.text = context.getString(R.string.plan_usage_key_count, state.planKeys.size)
         binding.tvRefreshStatus.text = when {
             state.isRefreshingAll -> context.getString(

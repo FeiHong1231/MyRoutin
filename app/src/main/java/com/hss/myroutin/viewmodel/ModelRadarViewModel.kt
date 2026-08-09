@@ -11,9 +11,12 @@ import com.hss.myroutin.repository.ModelRadarLoadResult
 import com.hss.myroutin.repository.ModelRadarRepository
 import com.hss.myroutin.store.ModelRadarCacheStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +41,12 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
 
     /** 页面只观察不可变状态，旋转后由新 Activity 恢复当前快照。 */
     val uiState: StateFlow<ModelRadarUiState> = _uiState.asStateFlow()
+
+    /** 刷新失败等一次性反馈通过事件通道发送，避免把错误文案固定在页面内容中。 */
+    private val eventChannel = Channel<ModelRadarUiEvent>(capacity = Channel.UNLIMITED)
+
+    /** 页面级一次性 UI 副作用，例如刷新失败 Toast。 */
+    val events: Flow<ModelRadarUiEvent> = eventChannel.receiveAsFlow()
 
     init {
         loadCacheAndRefresh()
@@ -70,13 +79,13 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
         }
     }
 
-    /** 请求成功后写入紧凑缓存；失败时保留已有快照并给出明确状态。 */
+    /** 请求成功后写入紧凑缓存；失败时保留已有快照并通过一次性事件提示用户。 */
     private suspend fun refreshRemote() {
         _uiState.update { state ->
             state.copy(
                 isLoading = state.snapshot == null,
                 isRefreshing = true,
-                statusMessage = null
+                isLoadFailed = false
             )
         }
         when (val result = repository.load()) {
@@ -88,24 +97,27 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
                         isLoading = false,
                         isRefreshing = false,
                         isShowingCachedData = false,
-                        statusMessage = null
+                        isLoadFailed = false
                     )
                 }
             }
 
             is ModelRadarLoadResult.Failure -> {
+                val currentState = _uiState.value
+                val failureMessage = if (currentState.snapshot == null) {
+                    resolveLoadError(result.error)
+                } else {
+                    getString(R.string.model_radar_refresh_failed_with_cache)
+                }
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
                         isRefreshing = false,
                         isShowingCachedData = state.snapshot != null,
-                        statusMessage = if (state.snapshot == null) {
-                            resolveLoadError(result.error)
-                        } else {
-                            getString(R.string.model_radar_refresh_failed_with_cache)
-                        }
+                        isLoadFailed = true
                     )
                 }
+                sendEvent(ModelRadarUiEvent.ShowToast(failureMessage))
             }
         }
     }
@@ -134,6 +146,11 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
         return getApplication<Application>().getString(stringResId, *formatArgs)
     }
 
+    /** 将一次性页面反馈写入通道，避免刷新失败信息进入可恢复页面状态。 */
+    private fun sendEvent(event: ModelRadarUiEvent) {
+        eventChannel.trySend(event)
+    }
+
     private companion object {
         private const val CACHE_TTL_MILLIS = 10 * 60 * 1_000L
     }
@@ -150,5 +167,16 @@ internal data class ModelRadarUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val isShowingCachedData: Boolean = false,
-    val statusMessage: String? = null
+    /** 请求失败时隐藏空状态文案，避免刷新失败同时出现页面内提示。 */
+    val isLoadFailed: Boolean = false
 )
+
+/**
+ * 说明：模型雷达页面的一次性 UI 副作用，避免 Toast 被状态重放时重复展示。
+ *
+ * @作者 huangssh
+ * @版本 3.0
+ */
+internal sealed interface ModelRadarUiEvent {
+    data class ShowToast(val message: String) : ModelRadarUiEvent
+}

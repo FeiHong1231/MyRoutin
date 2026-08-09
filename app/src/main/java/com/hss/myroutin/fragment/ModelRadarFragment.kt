@@ -28,6 +28,7 @@ import com.hss.myroutin.databinding.FragmentModelRadarBinding
 import com.hss.myroutin.logic.PlanUsageFormatter
 import com.hss.myroutin.model.ModelRadarEfficiency
 import com.hss.myroutin.model.ModelRadarSnapshot
+import com.hss.myroutin.viewmodel.ModelRadarUiEvent
 import com.hss.myroutin.viewmodel.ModelRadarUiState
 import com.hss.myroutin.viewmodel.ModelRadarViewModel
 import com.hss.myroutin.widget.MyToastD
@@ -88,6 +89,10 @@ class ModelRadarFragment : Fragment() {
         binding.rvRecommendations.itemAnimator = null
         binding.rvRadarModels.itemAnimator = null
         binding.rvEfficiency.itemAnimator = null
+        binding.swipeRefreshModelRadar.setColorSchemeResources(R.color.plan_usage_brand_primary)
+        binding.swipeRefreshModelRadar.setOnRefreshListener { viewModel.refresh() }
+        binding.swipeRefreshEfficiency.setColorSchemeResources(R.color.plan_usage_brand_primary)
+        binding.swipeRefreshEfficiency.setOnRefreshListener { viewModel.refresh() }
         /** 横向推荐卡之间保留 8dp，末项保留 16dp 尾部空间以维持列表边界。 */
         binding.rvRecommendations.addItemDecoration(object : RecyclerView.ItemDecoration() {
             override fun getItemOffsets(
@@ -119,8 +124,16 @@ class ModelRadarFragment : Fragment() {
     private fun observeViewModel() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.uiState.collect(::render)
+                launch { viewModel.uiState.collect(::render) }
+                launch { viewModel.events.collect(::handleUiEvent) }
             }
+        }
+    }
+
+    /** 消费刷新失败等一次性页面反馈，不将错误信息常驻在页面内容中。 */
+    private fun handleUiEvent(event: ModelRadarUiEvent) {
+        when (event) {
+            is ModelRadarUiEvent.ShowToast -> MyToastD.show(event.message)
         }
     }
 
@@ -136,10 +149,11 @@ class ModelRadarFragment : Fragment() {
         recommendationAdapter.submitList(snapshot?.recommendations.orEmpty())
         modelAdapter.submitList(snapshot?.models.orEmpty())
 
-        binding.pbRadarLoading.isVisible = state.isLoading
-        binding.tvRadarStatus.text = state.statusMessage.orEmpty()
-        binding.tvRadarStatus.isVisible = !state.statusMessage.isNullOrBlank()
-        binding.tvRadarEmpty.isVisible = snapshot == null && !state.isLoading
+        binding.swipeRefreshModelRadar.isRefreshing = state.isRefreshing
+        binding.swipeRefreshEfficiency.isRefreshing = state.isRefreshing
+        binding.pbRadarLoading.isVisible = state.isLoading && !state.isRefreshing
+        binding.tvRadarStatus.isVisible = false
+        binding.tvRadarEmpty.isVisible = snapshot == null && !state.isLoading && !state.isLoadFailed
         binding.tvRecommendationTitle.isVisible = hasRecommendations
         binding.rvRecommendations.isVisible = hasRecommendations
         binding.tvModelOverviewTitle.isVisible = hasModels
@@ -153,10 +167,9 @@ class ModelRadarFragment : Fragment() {
             ?: getString(R.string.model_radar_waiting_update)
 
         // 智力效率和模型雷达共用同一份快照，切换页签只改变展示容器，不重复请求数据。
-        binding.pbEfficiencyLoading.isVisible = state.isLoading
-        binding.tvEfficiencyStatus.text = state.statusMessage.orEmpty()
-        binding.tvEfficiencyStatus.isVisible = !state.statusMessage.isNullOrBlank()
-        binding.tvEfficiencyEmpty.isVisible = !state.isLoading && !hasEfficiency
+        binding.pbEfficiencyLoading.isVisible = state.isLoading && !state.isRefreshing
+        binding.tvEfficiencyStatus.isVisible = false
+        binding.tvEfficiencyEmpty.isVisible = !state.isLoading && !hasEfficiency && !state.isLoadFailed
         binding.llEfficiencyTitleRow.isVisible = hasEfficiency
         binding.tvEfficiencyMeta.isVisible = hasEfficiency
         binding.tvEfficiencyMeta.text = snapshot?.recentRuns24h?.let { runs24h ->

@@ -98,28 +98,37 @@ internal class PlanUsageKeyCardBinder(
                 cardBinding.tvDetailLabelFirst,
                 cardBinding.tvDetailValueFirst,
                 context.getString(R.string.plan_usage_label_start_at),
-                PlanUsageFormatter.formatBeijingTime(legacyPeriod?.startAt)
+                PlanUsageFormatter.formatBeijingTime(
+                    legacyPeriod?.startAt,
+                    includeZoneLabel = false
+                )
             )
             bindDetailRow(
                 cardBinding.llDetailRowSecond,
                 cardBinding.tvDetailLabelSecond,
                 cardBinding.tvDetailValueSecond,
                 context.getString(R.string.plan_usage_label_end_at),
-                PlanUsageFormatter.formatBeijingTime(legacyPeriod?.endAt)
+                PlanUsageFormatter.formatBeijingTime(
+                    legacyPeriod?.endAt,
+                    includeZoneLabel = false
+                )
             )
             bindDetailRow(
                 cardBinding.llDetailRowThird,
                 cardBinding.tvDetailLabelThird,
                 cardBinding.tvDetailValueThird,
                 context.getString(R.string.plan_usage_window_end, dayWindowLabel),
-                PlanUsageFormatter.formatBeijingTime(legacyPeriod?.dayWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(
+                    legacyPeriod?.dayWindowEndAt,
+                    includeZoneLabel = false
+                )
             )
             bindDetailRow(
                 cardBinding.llDetailRowFourth,
                 cardBinding.tvDetailLabelFourth,
                 cardBinding.tvDetailValueFourth,
                 context.getString(R.string.plan_usage_window_end, weekWindowLabel),
-                PlanUsageFormatter.formatBeijingTime(legacyPeriod?.weekWindowEndAt)
+                formatWeekWindowEndValue(context, legacyPeriod?.weekWindowEndAt)
             )
             bindLastUpdatedRow(cardBinding, planKey)
             return
@@ -149,14 +158,20 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.tvDetailLabelThird,
             cardBinding.tvDetailValueThird,
             context.getString(R.string.plan_usage_label_start_at),
-            PlanUsageFormatter.formatBeijingTime(usage.startAt)
+            PlanUsageFormatter.formatBeijingTime(
+                usage.startAt,
+                includeZoneLabel = false
+            )
         )
         bindDetailRow(
             cardBinding.llDetailRowFourth,
             cardBinding.tvDetailLabelFourth,
             cardBinding.tvDetailValueFourth,
             context.getString(R.string.plan_usage_label_end_at),
-            PlanUsageFormatter.formatBeijingTime(usage.endAt)
+            PlanUsageFormatter.formatBeijingTime(
+                usage.endAt,
+                includeZoneLabel = false
+            )
         )
 
         if (usage.hasCycleUsage()) {
@@ -202,14 +217,17 @@ internal class PlanUsageKeyCardBinder(
                 cardBinding.tvCycleWindowEndLabelFirst,
                 cardBinding.tvCycleWindowEndValueFirst,
                 context.getString(R.string.plan_usage_window_end, dayWindowLabel),
-                PlanUsageFormatter.formatBeijingTime(usage.dayWindowEndAt)
+                PlanUsageFormatter.formatBeijingTime(
+                    usage.dayWindowEndAt,
+                    includeZoneLabel = false
+                )
             )
             bindDetailRow(
                 cardBinding.llCycleWindowEndSecond,
                 cardBinding.tvCycleWindowEndLabelSecond,
                 cardBinding.tvCycleWindowEndValueSecond,
                 context.getString(R.string.plan_usage_window_end, weekWindowLabel),
-                PlanUsageFormatter.formatBeijingTime(usage.weekWindowEndAt)
+                formatWeekWindowEndValue(context, usage.weekWindowEndAt)
             )
         }
         if (usage.hasResourceUsage()) {
@@ -358,9 +376,30 @@ internal class PlanUsageKeyCardBinder(
                     cardBinding.root.context.getString(R.string.plan_usage_last_update)
                 else -> cardBinding.root.context.getString(R.string.plan_usage_last_valid_data)
             },
-            timeMillis?.let { PlanUsageFormatter.formatLocalTime(it) }
+            timeMillis?.let {
+                PlanUsageFormatter.formatLocalTime(it, includeZoneLabel = false)
+            }
                 ?: cardBinding.root.context.getString(R.string.plan_usage_not_queried)
         )
+    }
+
+    /**
+     * 在周窗口结束日期后补充固定重置日；缺少有效时间时仅展示日期占位符。
+     * @param context 当前卡片用于读取本地化资源的上下文
+     * @param windowEndAt 服务端返回的周窗口结束时间
+     */
+    private fun formatWeekWindowEndValue(
+        context: Context,
+        windowEndAt: String?
+    ): String {
+        val formattedTime = PlanUsageFormatter.formatBeijingTime(
+            windowEndAt,
+            includeZoneLabel = false
+        )
+        val resetWeekday = PlanUsageFormatter.resolveBeijingWeekday(windowEndAt)
+        return resetWeekday?.let {
+            context.getString(R.string.plan_usage_week_window_end_value, formattedTime, it)
+        } ?: formattedTime
     }
 
     /**

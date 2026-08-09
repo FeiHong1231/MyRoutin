@@ -150,6 +150,7 @@
     <string name="plan_usage_label_allowed_models">允许模型</string>
     <string name="plan_usage_label_group_multipliers">分组倍率</string>
     <string name="plan_usage_window_end">%1$s窗口结束</string>
+    <string name="plan_usage_week_window_end_value">%1$s（每周%2$s重置）</string>
     <string name="plan_usage_quota_title">%1$s额度</string>
     <string name="plan_usage_type_status">%1$s / %2$s</string>
     <string name="plan_usage_last_check">本次检查</string>

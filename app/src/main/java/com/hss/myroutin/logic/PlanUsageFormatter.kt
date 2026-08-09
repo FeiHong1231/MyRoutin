@@ -2,6 +2,7 @@ package com.hss.myroutin.logic
 
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -29,18 +30,33 @@ internal object PlanUsageFormatter {
     /**
      * 将服务端 ISO 时间固定展示为北京时间，缺失或解析失败时返回占位符。
      * @param serverTime 服务端返回的 ISO 时间
+     * @param includeZoneLabel 是否在时间后附加“北京时间”文字
      */
-    fun formatBeijingTime(serverTime: String?): String {
+    fun formatBeijingTime(serverTime: String?, includeZoneLabel: Boolean = true): String {
         val timeMillis = parseServerTimeMillis(serverTime) ?: return EMPTY_VALUE_PLACEHOLDER
-        return formatBeijingDate(Date(timeMillis))
+        return formatBeijingDate(Date(timeMillis), includeZoneLabel)
     }
 
     /**
      * 将本地缓存时间按北京时间展示，与服务端周期时间保持同一种阅读习惯。
      * @param timeMillis 本地时间戳，单位为毫秒
+     * @param includeZoneLabel 是否在时间后附加“北京时间”文字
      */
-    fun formatLocalTime(timeMillis: Long): String {
-        return formatBeijingDate(Date(timeMillis))
+    fun formatLocalTime(timeMillis: Long, includeZoneLabel: Boolean = true): String {
+        return formatBeijingDate(Date(timeMillis), includeZoneLabel)
+    }
+
+    /**
+     * 根据周窗口结束时间解析北京时间对应的星期，用于说明周期额度的固定重置日。
+     * @param serverTime 服务端返回的周窗口结束时间
+     * @return 中文星期简称；时间缺失或解析失败时返回 null
+     */
+    fun resolveBeijingWeekday(serverTime: String?): String? {
+        val timeMillis = parseServerTimeMillis(serverTime) ?: return null
+        val calendar = Calendar.getInstance(BEIJING_TIME_ZONE, Locale.CHINA).apply {
+            timeInMillis = timeMillis
+        }
+        return BEIJING_WEEKDAY_LABELS.getOrNull(calendar.get(Calendar.DAY_OF_WEEK))
     }
 
     /**
@@ -137,11 +153,12 @@ internal object PlanUsageFormatter {
     }
 
     /** 北京时间格式器不跨调用共享，保证纯逻辑可安全用于不同线程。 */
-    private fun formatBeijingDate(date: Date): String {
+    private fun formatBeijingDate(date: Date, includeZoneLabel: Boolean): String {
         val dateFormat = SimpleDateFormat(BEIJING_TIME_PATTERN, Locale.CHINA).apply {
             timeZone = BEIJING_TIME_ZONE
         }
-        return "${dateFormat.format(date)} 北京时间"
+        val formattedDate = dateFormat.format(date)
+        return if (includeZoneLabel) "$formattedDate 北京时间" else formattedDate
     }
 
     private const val MASK_KEY_SHORT_LENGTH = 15
@@ -156,6 +173,9 @@ internal object PlanUsageFormatter {
     private const val MINUTES_PER_HOUR = 60L
     private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
     private const val MINUTES_PER_WEEK = 7L * MINUTES_PER_DAY
+
+    /** Calendar.DAY_OF_WEEK 以周日为 1，按该顺序映射中文星期简称。 */
+    private val BEIJING_WEEKDAY_LABELS = listOf("", "日", "一", "二", "三", "四", "五", "六")
 
     /** 服务端当前存在带毫秒和不带毫秒两种 ISO 时间格式。 */
     private val ISO_DATE_PATTERNS = listOf(

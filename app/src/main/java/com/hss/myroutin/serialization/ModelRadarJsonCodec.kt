@@ -32,7 +32,9 @@ internal object ModelRadarJsonCodec {
         fetchedAt: Long
     ): ModelRadarSnapshot {
         val intelligence = JSONObject(intelligenceBody)
-        require(intelligence.optInt("schema") == REMOTE_SCHEMA) { "Unsupported radar schema" }
+        require(intelligence.optInt("schema") == INTELLIGENCE_SCHEMA) {
+            "Unsupported intelligence schema"
+        }
         val taskIds = intelligence.optJSONArray("tasks").objectIds("id")
         val cells = intelligence.optJSONObject("cells")
             ?: throw IllegalArgumentException("Missing radar cells")
@@ -234,23 +236,29 @@ internal object ModelRadarJsonCodec {
         )
     }
 
-    /** 只保留每个推荐场景的第一候选，横向卡片不重复堆叠同一场景。 */
+    /**
+     * 每个推荐场景保留前两个候选，首选与备选仍沿用服务端排序，不在客户端重新猜测权重。
+     */
     private fun parseRecommendations(insights: JSONObject?): List<ModelRadarRecommendation> {
-        if (insights?.optInt("schema") != REMOTE_SCHEMA) {
+        if (insights?.optInt("schema") != INSIGHTS_SCHEMA) {
             return emptyList()
         }
-        return insights.optJSONArray("recommendations").objects().mapNotNull { category ->
-            val item = category.optJSONArray("items")?.optJSONObject(0) ?: return@mapNotNull null
-            val modelId = item.stringOrNull("model") ?: return@mapNotNull null
-            ModelRadarRecommendation(
-                title = category.stringOrNull("title") ?: return@mapNotNull null,
-                modelId = modelId,
-                modelName = DISPLAY_MODEL_NAMES[modelId] ?: modelId.removePrefix("gpt-"),
-                effort = item.stringOrNull("effort").orEmpty(),
-                iq = item.doubleOrNull("iq"),
-                averageCostUsd = item.doubleOrNull("average_cost_usd"),
-                averageDurationMinutes = item.doubleOrNull("average_duration_minutes")
-            )
+        return insights.optJSONArray("recommendations").objects().flatMap { category ->
+            val title = category.stringOrNull("title") ?: return@flatMap emptyList()
+            category.optJSONArray("items").objects()
+                .take(MAX_RECOMMENDATIONS_PER_SCENE)
+                .mapNotNull { item ->
+                    val modelId = item.stringOrNull("model") ?: return@mapNotNull null
+                    ModelRadarRecommendation(
+                        title = title,
+                        modelId = modelId,
+                        modelName = DISPLAY_MODEL_NAMES[modelId] ?: modelId.removePrefix("gpt-"),
+                        effort = item.stringOrNull("effort").orEmpty(),
+                        iq = item.doubleOrNull("iq"),
+                        averageCostUsd = item.doubleOrNull("average_cost_usd"),
+                        averageDurationMinutes = item.doubleOrNull("average_duration_minutes")
+                    )
+                }
         }
     }
 
@@ -314,13 +322,17 @@ internal object ModelRadarJsonCodec {
             modelName = DISPLAY_MODEL_NAMES.getValue(modelId),
             effort = effort,
             iq = iq,
+            passedTasks = passedTasks,
+            validTasks = validTasks,
             recentRuns24h = recentRuns24h,
             averageCostUsd = averageCostUsd,
             averageDurationMinutes = averageDurationMinutes,
             totalRuns = totalRuns,
             averageAgentSteps = averageAgentSteps ?: metricsPoint?.averageAgentSteps,
             averageTotalTokens = averageTotalTokens ?: metricsPoint?.averageTotalTokens,
-            cacheHitRate = cacheHitRate ?: metricsPoint?.cacheHitRate
+            cacheHitRate = cacheHitRate ?: metricsPoint?.cacheHitRate,
+            communityRating = communityRating,
+            communityRatingCount = communityRatingCount
         )
     }
 
@@ -351,6 +363,8 @@ internal object ModelRadarJsonCodec {
             put("modelName", modelName)
             put("effort", effort)
             put("iq", iq)
+            putNullable("passedTasks", passedTasks)
+            putNullable("validTasks", validTasks)
             putNullable("recentRuns24h", recentRuns24h)
             putNullable("averageCostUsd", averageCostUsd)
             putNullable("averageDurationMinutes", averageDurationMinutes)
@@ -358,6 +372,8 @@ internal object ModelRadarJsonCodec {
             putNullable("averageAgentSteps", averageAgentSteps)
             putNullable("averageTotalTokens", averageTotalTokens)
             putNullable("cacheHitRate", cacheHitRate)
+            putNullable("communityRating", communityRating)
+            putNullable("communityRatingCount", communityRatingCount)
         }
     }
 
@@ -388,20 +404,24 @@ internal object ModelRadarJsonCodec {
             modelName = optString("modelName"),
             effort = optString("effort"),
             iq = optDouble("iq", 0.0),
+            passedTasks = intOrNull("passedTasks"),
+            validTasks = intOrNull("validTasks"),
             recentRuns24h = intOrNull("recentRuns24h"),
             averageCostUsd = doubleOrNull("averageCostUsd"),
             averageDurationMinutes = doubleOrNull("averageDurationMinutes"),
             totalRuns = optInt("totalRuns"),
             averageAgentSteps = doubleOrNull("averageAgentSteps"),
             averageTotalTokens = doubleOrNull("averageTotalTokens"),
-            cacheHitRate = doubleOrNull("cacheHitRate")
+            cacheHitRate = doubleOrNull("cacheHitRate"),
+            communityRating = doubleOrNull("communityRating"),
+            communityRatingCount = intOrNull("communityRatingCount")
         )
     }
 
     /** 解析轻量接口的整体更新时间、档位样本量和运行效率指标。 */
     private fun parseIntelligenceMetrics(body: String?): IntelligenceMetrics? {
         val root = body?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
-        if (root.optInt("schema") != REMOTE_SCHEMA) return null
+        if (root.optInt("schema") != METRICS_SCHEMA) return null
         val pointsById = root.optJSONArray("points").objects().mapNotNull { item ->
             val modelId = item.stringOrNull("model") ?: return@mapNotNull null
             val effort = item.stringOrNull("effort") ?: return@mapNotNull null
@@ -474,8 +494,12 @@ internal object ModelRadarJsonCodec {
         val cacheHitRate: Double?
     )
 
-    private const val REMOTE_SCHEMA = 1
+    /** 各公开接口独立演进 schema，禁止再用同一个版本号同时校验。 */
+    private const val INTELLIGENCE_SCHEMA = 1
+    private const val INSIGHTS_SCHEMA = 1
+    private const val METRICS_SCHEMA = 2
     private const val CACHE_SCHEMA = 3
+    private const val MAX_RECOMMENDATIONS_PER_SCENE = 2
     private const val IQ_SCALE = 150.0
     private const val SECONDS_PER_MINUTE = 60.0
 

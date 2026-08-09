@@ -154,78 +154,413 @@
                 </LinearLayout>
 
                 <LinearLayout
+                    android:id="@+id/llRadarDecision"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:paddingStart="16dp"
                     android:paddingTop="4dp"
-                    android:paddingEnd="0dp">
+                    android:paddingEnd="16dp"
+                    android:visibility="gone"
+                    tools:visibility="visible">
 
                     <TextView
-                        android:id="@+id/tvRecommendationTitle"
+                        android:id="@+id/tvRadarDecisionTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="14dp"
                         android:singleLine="true"
-                        android:text="@string/model_radar_recommendation_title"
+                        android:text="@string/model_radar_decision_title"
                         android:textColor="@color/plan_usage_text_primary"
                         android:textSize="18sp"
-                        android:textStyle="bold"
-                        android:visibility="gone"
-                        tools:visibility="visible" />
-
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/rvRecommendations"
-                        android:layout_width="match_parent"
-                        android:layout_height="112dp"
-                        android:layout_marginTop="8dp"
-                        android:clipToPadding="false"
-                        android:nestedScrollingEnabled="false"
-                        android:orientation="horizontal"
-                        android:overScrollMode="never"
-                        android:visibility="gone"
-                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                        tools:listitem="@layout/item_model_radar_recommendation"
-                        tools:visibility="visible" />
+                        android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvModelOverviewTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:singleLine="true"
-                        android:text="@string/model_radar_model_overview_title"
-                        android:textColor="@color/plan_usage_text_primary"
-                        android:textSize="18sp"
-                        android:textStyle="bold"
-                        android:visibility="gone"
-                        tools:visibility="visible" />
-
-                    <TextView
-                        android:id="@+id/tvModelOverviewHint"
+                        android:id="@+id/tvRadarDecisionSubtitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="3dp"
                         android:singleLine="true"
-                        android:text="@string/model_radar_model_overview_hint"
+                        android:text="@string/model_radar_decision_subtitle"
                         android:textColor="@color/plan_usage_text_tertiary"
-                        android:textSize="12sp"
-                        android:visibility="gone"
-                        tools:visibility="visible" />
-                </LinearLayout>
+                        android:textSize="12sp" />
 
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/rvRadarModels"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:nestedScrollingEnabled="false"
-                    android:orientation="vertical"
-                    android:overScrollMode="never"
-                    android:visibility="gone"
-                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                    tools:listitem="@layout/item_model_radar_model"
-                    tools:visibility="visible" />
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvRecommendations"
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:layout_marginTop="12dp"
+                        android:clipToPadding="false"
+                        android:nestedScrollingEnabled="false"
+                        android:orientation="horizontal"
+                        android:overScrollMode="never"
+                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                        tools:listitem="@layout/item_model_radar_recommendation" />
+
+                    <LinearLayout
+                        android:id="@+id/llRadarDecisionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/bg_plan_usage_panel"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="72dp"
+                                android:layout_height="wrap_content"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_decision_metric"
+                                android:textColor="@color/plan_usage_text_tertiary"
+                                android:textSize="11sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_decision_primary"
+                                android:textColor="@color/plan_usage_brand_primary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_decision_alternative"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="72dp"
+                                android:layout_height="wrap_content"
+                                android:text="@string/model_radar_decision_model"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp" />
+
+                            <LinearLayout
+                                android:id="@+id/llRadarPrimaryCandidate"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center"
+                                android:orientation="vertical"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp">
+
+                                <TextView
+                                    android:id="@+id/tvRadarPrimaryModel"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:gravity="center"
+                                    android:singleLine="true"
+                                    android:textColor="@color/plan_usage_text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    tools:text="5.6-sol" />
+
+                                <TextView
+                                    android:id="@+id/tvRadarPrimaryEffort"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:ellipsize="end"
+                                    android:gravity="center"
+                                    android:singleLine="true"
+                                    android:textColor="@color/plan_usage_brand_primary"
+                                    android:textSize="10sp"
+                                    tools:text="xhigh 极高" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:id="@+id/llRadarAlternativeCandidate"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center"
+                                android:orientation="vertical"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp">
+
+                                <TextView
+                                    android:id="@+id/tvRadarAlternativeModel"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:gravity="center"
+                                    android:singleLine="true"
+                                    android:textColor="@color/plan_usage_text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    tools:text="5.6-luna" />
+
+                                <TextView
+                                    android:id="@+id/tvRadarAlternativeEffort"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:ellipsize="end"
+                                    android:gravity="center"
+                                    android:singleLine="true"
+                                    android:textColor="@color/plan_usage_text_secondary"
+                                    android:textSize="10sp"
+                                    tools:text="max 最高" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="12dp"
+                            android:background="@color/plan_usage_divider" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="72dp"
+                                android:layout_height="wrap_content"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_metric_iq"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/tvRadarPrimaryIq"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="107.1" />
+
+                            <TextView
+                                android:id="@+id/tvRadarAlternativeIq"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="92.9" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/plan_usage_divider" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="72dp"
+                                android:layout_height="wrap_content"
+                                android:text="@string/model_radar_metric_cost"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/tvRadarPrimaryCost"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="$6.33" />
+
+                            <TextView
+                                android:id="@+id/tvRadarAlternativeCost"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="$0.47" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/plan_usage_divider" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="72dp"
+                                android:layout_height="wrap_content"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_metric_duration"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/tvRadarPrimaryDuration"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="25分钟" />
+
+                            <TextView
+                                android:id="@+id/tvRadarAlternativeDuration"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:singleLine="true"
+                                android:textColor="@color/plan_usage_text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="33分钟" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:singleLine="true"
+                            android:text="@string/model_radar_decision_summary_title"
+                            android:textColor="@color/plan_usage_text_secondary"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvRadarDecisionSummary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:background="@drawable/bg_plan_usage_card_action"
+                            android:lineSpacingExtra="2dp"
+                            android:padding="12dp"
+                            android:textColor="@color/plan_usage_text_primary"
+                            android:textSize="13sp"
+                            tools:text="5.6-luna max 相比 5.6-sol xhigh：IQ 低 14.2，费用节省 92.6%，平均多耗时 8 分钟。" />
+
+                        <LinearLayout
+                            android:id="@+id/llRadarCommunity"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:singleLine="true"
+                                android:text="@string/model_radar_decision_community_title"
+                                android:textColor="@color/plan_usage_text_secondary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="7dp"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:id="@+id/tvRadarPrimaryCommunity"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center"
+                                    android:maxLines="2"
+                                    android:textColor="@color/plan_usage_text_secondary"
+                                    android:textSize="12sp"
+                                    tools:text="8.7 分 · 51 人评分" />
+
+                                <TextView
+                                    android:id="@+id/tvRadarAlternativeCommunity"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center"
+                                    android:maxLines="2"
+                                    android:textColor="@color/plan_usage_text_secondary"
+                                    android:textSize="12sp"
+                                    tools:text="8.1 分 · 54 人评分" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:singleLine="true"
+                            android:text="@string/model_radar_decision_evidence_title"
+                            android:textColor="@color/plan_usage_text_secondary"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvRadarPrimaryEvidence"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="7dp"
+                            android:textColor="@color/plan_usage_text_tertiary"
+                            android:textSize="12sp"
+                            tools:text="首选：通过 72/96 题 · 近24h 18 次" />
+
+                        <TextView
+                            android:id="@+id/tvRadarAlternativeEvidence"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:textColor="@color/plan_usage_text_tertiary"
+                            android:textSize="12sp"
+                            tools:text="备选：通过 60/96 题 · 近24h 20 次" />
+                    </LinearLayout>
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/tvRadarSource"

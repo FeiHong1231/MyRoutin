@@ -20,13 +20,13 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.hss.myroutin.R
-import com.hss.myroutin.adapter.ModelRadarAdapter
 import com.hss.myroutin.adapter.ModelRadarEfficiencyAdapter
 import com.hss.myroutin.adapter.ModelRadarRecommendationAdapter
 import com.hss.myroutin.databinding.DialogModelRadarEfficiencyBinding
 import com.hss.myroutin.databinding.FragmentModelRadarBinding
 import com.hss.myroutin.logic.PlanUsageFormatter
 import com.hss.myroutin.model.ModelRadarEfficiency
+import com.hss.myroutin.model.ModelRadarRecommendation
 import com.hss.myroutin.model.ModelRadarSnapshot
 import com.hss.myroutin.viewmodel.ModelRadarUiEvent
 import com.hss.myroutin.viewmodel.ModelRadarUiState
@@ -34,9 +34,10 @@ import com.hss.myroutin.viewmodel.ModelRadarViewModel
 import com.hss.myroutin.widget.MyToastD
 import com.hss.myroutin.widget.dp
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
- * 说明：模型一级页，展示 CodexRadar 公开聚合数据、场景推荐与手动刷新状态。
+ * 说明：模型一级页，展示 CodexRadar 场景决策、智力效率与手动刷新状态。
  *
  * @作者 huangssh
  * @版本 3.0
@@ -48,11 +49,13 @@ class ModelRadarFragment : Fragment() {
     private val binding: FragmentModelRadarBinding
         get() = requireNotNull(_binding)
 
-    /** 场景推荐和模型详情分层展示，避免单个 Adapter 混合两种信息类型。 */
+    /** 场景列表只负责切换决策上下文，首选与备选对比由页面直接绑定。 */
     private val recommendationAdapter = ModelRadarRecommendationAdapter()
-    private val modelAdapter = ModelRadarAdapter()
     /** 智力效率按模型/档位逐张展示，适配官网宽屏矩阵在手机上的纵向阅读。 */
     private val efficiencyAdapter = ModelRadarEfficiencyAdapter()
+    /** 当前决策场景和完整候选保留在 Fragment 内，切换场景不重复请求网络。 */
+    private var selectedRadarScenarioTitle: String? = null
+    private var allRadarRecommendations: List<ModelRadarRecommendation> = emptyList()
     /** 当前效率页筛选条件只影响展示，不改变缓存中的完整快照。 */
     private var selectedEfficiencyModelId: String? = null
     private var selectedEfficiencyEffort: String? = null
@@ -84,10 +87,8 @@ class ModelRadarFragment : Fragment() {
     /** 初始化雷达列表和点击事件，刷新过程中由状态暂时禁用按钮。 */
     private fun initializePage() {
         binding.rvRecommendations.adapter = recommendationAdapter
-        binding.rvRadarModels.adapter = modelAdapter
         binding.rvEfficiency.adapter = efficiencyAdapter
         binding.rvRecommendations.itemAnimator = null
-        binding.rvRadarModels.itemAnimator = null
         binding.rvEfficiency.itemAnimator = null
         binding.swipeRefreshModelRadar.setColorSchemeResources(R.color.plan_usage_brand_primary)
         binding.swipeRefreshModelRadar.setOnRefreshListener { viewModel.refresh() }
@@ -107,6 +108,10 @@ class ModelRadarFragment : Fragment() {
                 }
             }
         })
+        recommendationAdapter.setOnScenarioClickListener { title ->
+            selectedRadarScenarioTitle = title
+            renderRadarDecision()
+        }
         efficiencyAdapter.setOnPointClickListener(::showEfficiencyDetails)
         binding.rgModelRadarTabs.setOnCheckedChangeListener { _, checkedId ->
             val isEfficiency = checkedId == R.id.rbIntelligenceEfficiency
@@ -144,21 +149,18 @@ class ModelRadarFragment : Fragment() {
     private fun render(state: ModelRadarUiState) {
         val snapshot = state.snapshot
         val hasRecommendations = snapshot?.recommendations?.isNotEmpty() == true
-        val hasModels = snapshot?.models?.isNotEmpty() == true
         val hasEfficiency = snapshot?.efficiencyPoints?.isNotEmpty() == true
-        recommendationAdapter.submitList(snapshot?.recommendations.orEmpty())
-        modelAdapter.submitList(snapshot?.models.orEmpty())
+        allRadarRecommendations = snapshot?.recommendations.orEmpty()
+        val efficiencyPoints = snapshot?.efficiencyPoints.orEmpty()
+        allEfficiencyPoints = efficiencyPoints
+        renderRadarDecision()
 
         binding.swipeRefreshModelRadar.isRefreshing = state.isRefreshing
         binding.swipeRefreshEfficiency.isRefreshing = state.isRefreshing
         binding.pbRadarLoading.isVisible = state.isLoading && !state.isRefreshing
         binding.tvRadarStatus.isVisible = false
-        binding.tvRadarEmpty.isVisible = snapshot == null && !state.isLoading && !state.isLoadFailed
-        binding.tvRecommendationTitle.isVisible = hasRecommendations
-        binding.rvRecommendations.isVisible = hasRecommendations
-        binding.tvModelOverviewTitle.isVisible = hasModels
-        binding.tvModelOverviewHint.isVisible = hasModels
-        binding.rvRadarModels.isVisible = hasModels
+        binding.tvRadarEmpty.isVisible = !state.isLoading && !hasRecommendations
+        binding.llRadarDecision.isVisible = hasRecommendations
         binding.btnRefreshRadar.isEnabled = !state.isRefreshing
         binding.btnRefreshRadar.text = getString(
             if (state.isRefreshing) R.string.plan_usage_refreshing else R.string.action_refresh
@@ -175,8 +177,6 @@ class ModelRadarFragment : Fragment() {
         binding.tvEfficiencyMeta.text = snapshot?.recentRuns24h?.let { runs24h ->
             getString(R.string.model_radar_efficiency_meta, runs24h)
         }.orEmpty()
-        val efficiencyPoints = snapshot?.efficiencyPoints.orEmpty()
-        allEfficiencyPoints = efficiencyPoints
         setupEfficiencyFilters(efficiencyPoints)
         renderEfficiencyPoints(efficiencyPoints, showEmpty = !state.isLoading)
         binding.llEfficiencyFilters.isVisible = hasEfficiency
@@ -186,6 +186,251 @@ class ModelRadarFragment : Fragment() {
         )
         binding.tvEfficiencyUpdatedAt.text = snapshot?.let(::formatUpdatedAt)
             ?: getString(R.string.model_radar_waiting_update)
+    }
+
+    /**
+     * 根据当前场景绑定首选、备选和真实差值；服务端候选顺序就是页面决策顺序。
+     */
+    private fun renderRadarDecision() {
+        val sceneOptions = allRadarRecommendations.distinctBy(ModelRadarRecommendation::title)
+        if (sceneOptions.isEmpty()) {
+            recommendationAdapter.submitList(emptyList())
+            return
+        }
+        val availableTitles = sceneOptions.map(ModelRadarRecommendation::title)
+        val defaultTitle = getString(R.string.model_radar_scene_daily)
+        val selectedTitle = selectedRadarScenarioTitle
+            ?.takeIf(availableTitles::contains)
+            ?: defaultTitle.takeIf(availableTitles::contains)
+            ?: availableTitles.first()
+        selectedRadarScenarioTitle = selectedTitle
+        recommendationAdapter.submitList(sceneOptions)
+        recommendationAdapter.setSelectedTitle(selectedTitle)
+
+        val candidates = allRadarRecommendations.filter { it.title == selectedTitle }
+        val primary = candidates.firstOrNull() ?: return
+        val alternative = candidates.getOrNull(1)
+        val primaryPoint = findEfficiencyPoint(primary)
+        val alternativePoint = alternative?.let(::findEfficiencyPoint)
+
+        binding.tvRadarPrimaryModel.text = primary.modelName
+        binding.tvRadarPrimaryEffort.text = PlanUsageFormatter.formatEffortLabel(primary.effort)
+        binding.tvRadarPrimaryIq.text = formatRadarDecimal(primary.iq)
+        binding.tvRadarPrimaryCost.text = PlanUsageFormatter.formatUsd(primary.averageCostUsd)
+        binding.tvRadarPrimaryDuration.text = formatRadarDuration(primary.averageDurationMinutes)
+
+        binding.tvRadarAlternativeModel.text = alternative?.modelName
+            ?: getString(R.string.model_radar_decision_alternative_unavailable)
+        binding.tvRadarAlternativeEffort.text = alternative
+            ?.let { PlanUsageFormatter.formatEffortLabel(it.effort) }
+            .orEmpty()
+        binding.tvRadarAlternativeIq.text = formatRadarDecimal(alternative?.iq)
+        binding.tvRadarAlternativeCost.text = PlanUsageFormatter.formatUsd(alternative?.averageCostUsd)
+        binding.tvRadarAlternativeDuration.text = formatRadarDuration(
+            alternative?.averageDurationMinutes
+        )
+        binding.tvRadarDecisionSummary.text = buildRadarDecisionSummary(primary, alternative)
+
+        bindRadarCandidateDetails(primaryPoint, alternativePoint)
+    }
+
+    /**
+     * 按模型与 effort 精确定位档位明细，避免误用同模型最高 IQ 档位的数据。
+     * @param recommendation 当前场景候选
+     * @return 对应的智力效率档位，找不到时返回空
+     */
+    private fun findEfficiencyPoint(
+        recommendation: ModelRadarRecommendation
+    ): ModelRadarEfficiency? {
+        return allEfficiencyPoints.firstOrNull { point ->
+            point.modelId == recommendation.modelId && point.effort == recommendation.effort
+        }
+    }
+
+    /**
+     * 绑定社区体感、样本依据和候选详情入口，所有可选字段均按实际存在情况降级。
+     * @param primaryPoint 首选档位明细
+     * @param alternativePoint 备选档位明细
+     */
+    private fun bindRadarCandidateDetails(
+        primaryPoint: ModelRadarEfficiency?,
+        alternativePoint: ModelRadarEfficiency?
+    ) {
+        binding.llRadarPrimaryCandidate.isFocusable = primaryPoint != null
+        binding.llRadarPrimaryCandidate.setOnClickListener(
+            primaryPoint?.let { point ->
+                View.OnClickListener { showEfficiencyDetails(point) }
+            }
+        )
+        binding.llRadarPrimaryCandidate.isClickable = primaryPoint != null
+        binding.llRadarAlternativeCandidate.isFocusable = alternativePoint != null
+        binding.llRadarAlternativeCandidate.setOnClickListener(
+            alternativePoint?.let { point ->
+                View.OnClickListener { showEfficiencyDetails(point) }
+            }
+        )
+        binding.llRadarAlternativeCandidate.isClickable = alternativePoint != null
+
+        val hasCommunityRating = primaryPoint?.communityRating != null ||
+            alternativePoint?.communityRating != null
+        binding.llRadarCommunity.isVisible = hasCommunityRating
+        binding.tvRadarPrimaryCommunity.text = formatCommunityRating(primaryPoint)
+        binding.tvRadarAlternativeCommunity.text = formatCommunityRating(alternativePoint)
+        binding.tvRadarPrimaryEvidence.text = getString(
+            R.string.model_radar_decision_evidence_item,
+            getString(R.string.model_radar_decision_primary),
+            formatRadarEvidence(primaryPoint)
+        )
+        binding.tvRadarAlternativeEvidence.text = getString(
+            R.string.model_radar_decision_evidence_item,
+            getString(R.string.model_radar_decision_alternative),
+            formatRadarEvidence(alternativePoint)
+        )
+    }
+
+    /** 根据首选与备选的真实指标生成差异文案，不对模型能力做主观推断。 */
+    private fun buildRadarDecisionSummary(
+        primary: ModelRadarRecommendation,
+        alternative: ModelRadarRecommendation?
+    ): String {
+        alternative ?: return getString(R.string.model_radar_decision_summary_no_alternative)
+        val differences = buildList {
+            buildIqDifference(primary.iq, alternative.iq)?.let(::add)
+            buildCostDifference(primary.averageCostUsd, alternative.averageCostUsd)?.let(::add)
+            buildDurationDifference(
+                primary.averageDurationMinutes,
+                alternative.averageDurationMinutes
+            )?.let(::add)
+        }
+        if (differences.isEmpty()) {
+            return getString(R.string.model_radar_decision_summary_unavailable)
+        }
+        return getString(
+            R.string.model_radar_decision_summary,
+            formatRadarCandidateName(alternative),
+            formatRadarCandidateName(primary),
+            differences.joinToString(separator = "，")
+        )
+    }
+
+    /** IQ 差值只陈述高低和数值，不把测试通过率指数解释成综合能力。 */
+    private fun buildIqDifference(primary: Double?, alternative: Double?): String? {
+        if (primary == null || alternative == null) return null
+        val difference = alternative - primary
+        return when {
+            abs(difference) < RADAR_DECISION_EPSILON -> {
+                getString(R.string.model_radar_decision_iq_same)
+            }
+
+            difference < 0.0 -> getString(
+                R.string.model_radar_decision_iq_lower,
+                PlanUsageFormatter.formatDecimal(abs(difference))
+            )
+
+            else -> getString(
+                R.string.model_radar_decision_iq_higher,
+                PlanUsageFormatter.formatDecimal(difference)
+            )
+        }
+    }
+
+    /** 单次费用按首选为基准计算百分比，基准为零或字段缺失时不生成误导结论。 */
+    private fun buildCostDifference(primary: Double?, alternative: Double?): String? {
+        if (primary == null || alternative == null || primary <= 0.0) return null
+        val percentage = (alternative - primary) / primary * PERCENT_SCALE
+        return when {
+            abs(percentage) < RADAR_PERCENT_EPSILON -> {
+                getString(R.string.model_radar_decision_cost_same)
+            }
+
+            percentage < 0.0 -> getString(
+                R.string.model_radar_decision_cost_lower,
+                PlanUsageFormatter.formatDecimal(abs(percentage))
+            )
+
+            else -> getString(
+                R.string.model_radar_decision_cost_higher,
+                PlanUsageFormatter.formatDecimal(percentage)
+            )
+        }
+    }
+
+    /** 平均耗时差按分钟展示，正数表示备选更慢，负数表示备选更快。 */
+    private fun buildDurationDifference(primary: Double?, alternative: Double?): String? {
+        if (primary == null || alternative == null) return null
+        val difference = alternative - primary
+        return when {
+            abs(difference) < RADAR_DECISION_EPSILON -> {
+                getString(R.string.model_radar_decision_duration_same)
+            }
+
+            difference > 0.0 -> getString(
+                R.string.model_radar_decision_duration_longer,
+                PlanUsageFormatter.formatDecimal(difference)
+            )
+
+            else -> getString(
+                R.string.model_radar_decision_duration_shorter,
+                PlanUsageFormatter.formatDecimal(abs(difference))
+            )
+        }
+    }
+
+    /** 社区评分保留人数证据；旧缓存没有档位评分时明确显示暂无数据。 */
+    private fun formatCommunityRating(point: ModelRadarEfficiency?): String {
+        val rating = point?.communityRating
+            ?: return getString(R.string.model_radar_decision_community_unavailable)
+        val count = point.communityRatingCount
+        return if (count != null) {
+            getString(
+                R.string.model_radar_decision_community_value,
+                PlanUsageFormatter.formatDecimal(rating),
+                count
+            )
+        } else {
+            getString(
+                R.string.model_radar_decision_community_score,
+                PlanUsageFormatter.formatDecimal(rating)
+            )
+        }
+    }
+
+    /** 数据依据只组合真实存在的题目与近24小时样本，不自行评判可信等级。 */
+    private fun formatRadarEvidence(point: ModelRadarEfficiency?): String {
+        if (point == null) return getString(R.string.plan_usage_value_unavailable)
+        val evidence = buildList {
+            if (point.passedTasks != null && point.validTasks != null) {
+                add(
+                    getString(
+                        R.string.model_radar_decision_evidence_tasks,
+                        point.passedTasks,
+                        point.validTasks
+                    )
+                )
+            }
+            point.recentRuns24h?.let { runs24h ->
+                add(getString(R.string.model_radar_decision_evidence_runs, runs24h))
+            }
+        }
+        return evidence.joinToString(separator = " · ")
+            .ifEmpty { getString(R.string.plan_usage_value_unavailable) }
+    }
+
+    private fun formatRadarCandidateName(recommendation: ModelRadarRecommendation): String {
+        return listOf(recommendation.modelName, recommendation.effort)
+            .filter(String::isNotBlank)
+            .joinToString(separator = " ")
+    }
+
+    private fun formatRadarDecimal(value: Double?): String {
+        return value?.let(PlanUsageFormatter::formatDecimal)
+            ?: getString(R.string.plan_usage_value_unavailable)
+    }
+
+    private fun formatRadarDuration(value: Double?): String {
+        return value?.let(PlanUsageFormatter::formatDecimal)
+            ?.let { getString(R.string.model_radar_duration_minutes, it) }
+            ?: getString(R.string.plan_usage_value_unavailable)
     }
 
     /**
@@ -393,7 +638,6 @@ class ModelRadarFragment : Fragment() {
 
     override fun onDestroyView() {
         binding.rvRecommendations.adapter = null
-        binding.rvRadarModels.adapter = null
         binding.rvEfficiency.adapter = null
         // 动态筛选按钮随 View 一起销毁，避免下次创建页面时复用过期签名而跳过重建。
         efficiencyFilterSignature = null
@@ -405,6 +649,9 @@ class ModelRadarFragment : Fragment() {
         private const val CODEX_RADAR_URL = "https://codexradar.com/"
         private const val EFFICIENCY_VIEW_MODE_RANKING = "ranking"
         private const val EFFICIENCY_VIEW_MODE_GROUPED = "grouped"
+        private const val PERCENT_SCALE = 100.0
+        private const val RADAR_DECISION_EPSILON = 0.005
+        private const val RADAR_PERCENT_EPSILON = 0.05
         private val EFFORT_ORDER = listOf("ultra", "max", "xhigh", "high", "medium", "low")
         private val EFFICIENCY_MODEL_ORDER = listOf(
             "gpt-5.6-sol",

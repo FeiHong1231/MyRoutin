@@ -71,11 +71,17 @@ data class ModelRadarEfficiency(
     val modelName: String,
     val effort: String,
     val iq: Double,
+    /** 当前档位通过题数与有效题数，用于决策页说明推荐依据而不是重复展示排行。 */
+    val passedTasks: Int? = null,
+    val validTasks: Int? = null,
     val recentRuns24h: Int?,
     val averageCostUsd: Double?,
     val averageDurationMinutes: Double?,
     val totalRuns: Int,
     val averageAgentSteps: Double?,
     val averageTotalTokens: Double?,
-    val cacheHitRate: Double?
+    val cacheHitRate: Double?,
+    /** 社区体感必须按模型与 effort 精确匹配，不能复用模型最高 IQ 档位的评分。 */
+    val communityRating: Double? = null,
+    val communityRatingCount: Int? = null
 )

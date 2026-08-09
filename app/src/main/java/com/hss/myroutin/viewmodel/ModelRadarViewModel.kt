@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hss.myroutin.R
 import com.hss.myroutin.model.ModelRadarSnapshot
+import com.hss.myroutin.repository.ModelRadarDiagnostics
 import com.hss.myroutin.repository.ModelRadarLoadError
 import com.hss.myroutin.repository.ModelRadarLoadResult
 import com.hss.myroutin.repository.ModelRadarRepository
@@ -54,7 +55,11 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
 
     /** 用户手动刷新时忽略缓存有效期，但禁止并发发起重复的 3 MB 请求。 */
     fun refresh() {
-        if (_uiState.value.isRefreshing) return
+        if (_uiState.value.isRefreshing) {
+            ModelRadarDiagnostics.debug { "忽略重复的手动刷新请求" }
+            return
+        }
+        ModelRadarDiagnostics.debug { "用户触发手动刷新" }
         viewModelScope.launch { refreshRemote() }
     }
 
@@ -63,6 +68,7 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
         viewModelScope.launch {
             val cachedSnapshot = withContext(Dispatchers.IO) { cacheStore.load() }
             if (cachedSnapshot != null) {
+                ModelRadarDiagnostics.logSnapshot("缓存", cachedSnapshot)
                 _uiState.update { state ->
                     state.copy(
                         snapshot = cachedSnapshot,
@@ -70,10 +76,14 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
                         isShowingCachedData = true
                     )
                 }
+            } else {
+                ModelRadarDiagnostics.debug { "缓存未命中或缓存解析失败" }
             }
             if (cachedSnapshot == null || !isCacheFresh(cachedSnapshot)) {
+                ModelRadarDiagnostics.debug { "缓存不可用或已过期，开始远端刷新" }
                 refreshRemote()
             } else {
+                ModelRadarDiagnostics.debug { "缓存仍在有效期内，本次不请求远端" }
                 _uiState.update { it.copy(isLoading = false) }
             }
         }
@@ -81,6 +91,9 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
 
     /** 请求成功后写入紧凑缓存；失败时保留已有快照并通过一次性事件提示用户。 */
     private suspend fun refreshRemote() {
+        ModelRadarDiagnostics.debug {
+            "远端刷新开始，当前是否有可降级快照=${_uiState.value.snapshot != null}"
+        }
         _uiState.update { state ->
             state.copy(
                 isLoading = state.snapshot == null,
@@ -91,6 +104,7 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
         when (val result = repository.load()) {
             is ModelRadarLoadResult.Success -> {
                 withContext(Dispatchers.IO) { cacheStore.save(result.snapshot) }
+                ModelRadarDiagnostics.debug { "远端快照已写入缓存" }
                 _uiState.update { state ->
                     state.copy(
                         snapshot = result.snapshot,
@@ -104,6 +118,10 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
 
             is ModelRadarLoadResult.Failure -> {
                 val currentState = _uiState.value
+                ModelRadarDiagnostics.debug {
+                    "远端刷新失败，error=${result.error.debugDescription()}，" +
+                        "继续展示缓存=${currentState.snapshot != null}"
+                }
                 val failureMessage = if (currentState.snapshot == null) {
                     resolveLoadError(result.error)
                 } else {
@@ -125,7 +143,22 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
     /** 自动刷新窗口与站点页面的十分钟更新频率保持一致。 */
     private fun isCacheFresh(snapshot: ModelRadarSnapshot): Boolean {
         val cacheAge = System.currentTimeMillis() - snapshot.fetchedAt
-        return snapshot.fetchedAt > 0L && cacheAge in 0L..CACHE_TTL_MILLIS
+        val isFresh = snapshot.fetchedAt > 0L && cacheAge in 0L..CACHE_TTL_MILLIS
+        ModelRadarDiagnostics.debug {
+            "缓存有效期检查：age=${cacheAge}ms，ttl=${CACHE_TTL_MILLIS}ms，isFresh=$isFresh"
+        }
+        return isFresh
+    }
+
+    /** 将稳定错误类型转换为仅供 Debug 日志查看的简短描述。 */
+    private fun ModelRadarLoadError.debugDescription(): String {
+        return when (this) {
+            is ModelRadarLoadError.Http -> "Http($responseCode)"
+            ModelRadarLoadError.NetworkTimeout -> "NetworkTimeout"
+            ModelRadarLoadError.NetworkUnavailable -> "NetworkUnavailable"
+            ModelRadarLoadError.InvalidResponse -> "InvalidResponse"
+            ModelRadarLoadError.Unknown -> "Unknown"
+        }
     }
 
     /** 将底层失败映射为本地化文案，禁止把第三方响应内容直接显示给用户。 */

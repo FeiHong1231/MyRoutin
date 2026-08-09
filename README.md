@@ -20,6 +20,16 @@ MyRoutin 是一个 Android 订阅额度查询工具，用于集中查看 Routin 
 
 首次从 GitHub 安装时，系统可能要求允许浏览器或文件管理器安装未知来源应用。若设备中已安装旧的 debug 测试包，请先卸载后再安装首个正式版。
 
+## 更新模型雷达内置快照
+
+APK 会内置一份模型雷达聚合快照，供无法访问 CodexRadar 且没有历史缓存的用户离线查看。发布新版本前，在已安装 debug 包的设备上打开模型雷达并手动刷新成功，然后执行：
+
+```bash
+python3 tools/update_model_radar_asset.py
+```
+
+脚本只导出 App 已聚合的页面字段，校验推荐、模型、档位和近 24 小时指标后更新 `app/src/main/assets/model_radar_snapshot.json`，不会把 CodexRadar 原始任务明细打入 APK。
+
 ## 反馈与贡献
 
 欢迎通过 [Issues](https://github.com/huangssh/MyRoutin/issues) 提交功能建议和问题反馈。

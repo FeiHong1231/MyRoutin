@@ -63,24 +63,34 @@ internal class ModelRadarViewModel(application: Application) : AndroidViewModel(
         viewModelScope.launch { refreshRemote() }
     }
 
-    /** 先展示紧凑缓存；只有缓存缺失或超过十分钟时才自动请求远端。 */
+    /**
+     * 在运行时缓存和 APK 内置快照中选择更新时间较新的数据，再按缓存时效刷新远端。
+     */
     private fun loadCacheAndRefresh() {
         viewModelScope.launch {
-            val cachedSnapshot = withContext(Dispatchers.IO) { cacheStore.load() }
-            if (cachedSnapshot != null) {
-                ModelRadarDiagnostics.logSnapshot("缓存", cachedSnapshot)
+            val (cachedSnapshot, bundledSnapshot) = withContext(Dispatchers.IO) {
+                cacheStore.load() to cacheStore.loadBundled()
+            }
+            val isBundledNewer = bundledSnapshot != null &&
+                (cachedSnapshot == null || bundledSnapshot.fetchedAt > cachedSnapshot.fetchedAt)
+            val localSnapshot = if (isBundledNewer) bundledSnapshot else cachedSnapshot
+            val localSource = if (isBundledNewer) "内置快照" else "缓存"
+            if (localSnapshot != null) {
+                ModelRadarDiagnostics.logSnapshot(localSource, localSnapshot)
                 _uiState.update { state ->
                     state.copy(
-                        snapshot = cachedSnapshot,
+                        snapshot = localSnapshot,
                         isLoading = false,
                         isShowingCachedData = true
                     )
                 }
             } else {
-                ModelRadarDiagnostics.debug { "缓存未命中或缓存解析失败" }
+                ModelRadarDiagnostics.debug { "缓存和内置快照均未命中或解析失败" }
             }
-            if (cachedSnapshot == null || !isCacheFresh(cachedSnapshot)) {
-                ModelRadarDiagnostics.debug { "缓存不可用或已过期，开始远端刷新" }
+            if (cachedSnapshot == null || isBundledNewer || !isCacheFresh(cachedSnapshot)) {
+                ModelRadarDiagnostics.debug {
+                    "运行时缓存不可用、落后于内置快照或已过期，开始远端刷新"
+                }
                 refreshRemote()
             } else {
                 ModelRadarDiagnostics.debug { "缓存仍在有效期内，本次不请求远端" }

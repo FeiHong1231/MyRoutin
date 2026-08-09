@@ -12,8 +12,11 @@ import com.hss.myroutin.serialization.ModelRadarJsonCodec
  */
 internal class ModelRadarCacheStore(context: Context) {
 
+    /** 读取 SharedPreferences 和 APK assets 都使用 Application Context，避免持有页面实例。 */
+    private val applicationContext = context.applicationContext
+
     /** 公开雷达数据无需加密，但与订阅 Key 的加密缓存严格分库存放。 */
-    private val preferences = context.applicationContext.getSharedPreferences(
+    private val preferences = applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
         Context.MODE_PRIVATE
     )
@@ -22,6 +25,18 @@ internal class ModelRadarCacheStore(context: Context) {
     fun load(): ModelRadarSnapshot? {
         val json = preferences.getString(KEY_SNAPSHOT, null) ?: return null
         return runCatching { ModelRadarJsonCodec.decodeSnapshot(json) }.getOrNull()
+    }
+
+    /**
+     * 读取随 APK 发布的聚合快照，为首次安装且无法访问 CodexRadar 的用户提供基础数据。
+     * @return assets 快照有效时返回领域对象，文件缺失或损坏时返回空
+     */
+    fun loadBundled(): ModelRadarSnapshot? {
+        return runCatching {
+            applicationContext.assets.open(BUNDLED_SNAPSHOT_ASSET)
+                .bufferedReader()
+                .use { reader -> ModelRadarJsonCodec.decodeSnapshot(reader.readText()) }
+        }.getOrNull()
     }
 
     /**
@@ -37,5 +52,8 @@ internal class ModelRadarCacheStore(context: Context) {
     private companion object {
         private const val PREFERENCES_NAME = "model_radar_cache"
         private const val KEY_SNAPSHOT = "snapshot_v2"
+        /** 发布前由 tools/update_model_radar_asset.py 从最新聚合缓存更新。
+         * python3 tools/update_model_radar_asset.py */
+        private const val BUNDLED_SNAPSHOT_ASSET = "model_radar_snapshot.json"
     }
 }

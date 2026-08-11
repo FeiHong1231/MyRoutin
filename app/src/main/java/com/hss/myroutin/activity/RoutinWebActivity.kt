@@ -5,7 +5,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Message
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.View
 import android.webkit.CookieManager
@@ -18,7 +23,12 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.hss.myroutin.R
 import com.hss.myroutin.databinding.ActivityRoutinWebBinding
+import com.hss.myroutin.model.RoutinRecentGroup
 import com.hss.myroutin.widget.MyToastD
+import org.json.JSONObject
+import org.json.JSONTokener
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 
 /**
@@ -35,11 +45,17 @@ class RoutinWebActivity : AppCompatActivity() {
     /** 第三方登录说明弹窗只保留一个实例，避免网页连续重定向造成重复弹出。 */
     private var thirdPartyLoginDialog: AlertDialog? = null
 
+    /** 中文排版提醒只保留一个实例，并在当前安装中仅展示一次。 */
+    private var languageGuideDialog: AlertDialog? = null
+
     /** 临时 WebView 只用于解析 window.open 的目标地址，不承载可见网页内容。 */
     private var pendingPopupWebView: WebView? = null
 
     /** 标记从登录页进入的站内 OAuth 中转，确保后续站外重定向仍能触发说明弹窗。 */
     private var thirdPartyLoginRedirectPending = false
+
+    /** 主页面加载失败后阻止 onPageFinished 再次恢复加载提示，避免错误页持续显示获取中。 */
+    private var mainFrameLoadFailed = false
 
     /** 当前入口传入的页面标题，确保签到和套餐订阅复用容器但保留各自语义。 */
     private val pageTitle by lazy {
@@ -53,13 +69,65 @@ class RoutinWebActivity : AppCompatActivity() {
             ?: DAILY_CHECK_IN_URL
     }
 
+    /** 普通网页入口经过登录页后保留原始目标，避免登录成功被站点默认带回首页。 */
+    private var initialPageReturnPending = false
+
+    /** 回到原始目标页后清理登录过程历史，返回键直接退出当前网页容器。 */
+    private var clearHistoryAfterInitialPageReturn = false
+
+    /** Routin 登录为 SPA 路由，短轮询用于捕获不触发页面完成回调的登录成功跳转。 */
+    private val initialPageReturnHandler = Handler(Looper.getMainLooper())
+    private val initialPageReturnPoll = object : Runnable {
+        override fun run() {
+            maybeReturnToInitialPageAfterLogin(
+                binding.webRoutin,
+                binding.webRoutin.url.orEmpty()
+            )
+        }
+    }
+
+    /** 设置页同步入口使用同一个网页容器，成功后先让用户决定是否返回设置页。 */
+    private val recentGroupSyncMode by lazy {
+        intent.getBooleanExtra(EXTRA_RECENT_GROUP_SYNC, false)
+    }
+
+    /** 同步模式下仅在用户登录后将页面导航回模型请求日志，避免停留在账户首页。 */
+    private var recentGroupLogsRedirected = false
+
+    /** 页面表格由前端异步渲染，使用主线程短轮询等待最近一条成功记录出现。 */
+    private var recentGroupSyncAttempts = 0
+    private val recentGroupSyncHandler = Handler(Looper.getMainLooper())
+    private val recentGroupSyncPoll = object : Runnable {
+        override fun run() {
+            queryRecentGroupFromPage()
+        }
+    }
+
+    /** 抓取成功后暂存结果，用户选择返回设置时再通过 Activity Result 交给设置页。 */
+    private var pendingRecentGroup: RoutinRecentGroup? = null
+
+    /** 结果弹窗只在首次抓取成功时展示，点击“继续查看”后不因页面刷新重复出现。 */
+    private var recentGroupResultAcknowledged = false
+
+    /** 最近分组结果弹窗只保留一个实例，避免异步脚本回调重复创建弹窗。 */
+    private var recentGroupResultDialog: AlertDialog? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityRoutinWebBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        restoreInitialPageReturnState(savedInstanceState)
+        restorePendingRecentGroup(savedInstanceState)
         configureActionBar()
         configureWebView()
         restoreOrLoadPage(savedInstanceState)
+        renderLoadingState(
+            binding.webRoutin.url ?: initialPageUrl,
+            isPageLoading = savedInstanceState == null && pendingRecentGroup == null
+        )
+        pendingRecentGroup?.takeIf { !recentGroupResultAcknowledged }?.let { recentGroup ->
+            binding.webRoutin.post { showRecentGroupResultDialog(recentGroup) }
+        }
     }
 
     /** 配置独立网页页的标题和返回入口，避免用户被困在内嵌站点中。 */
@@ -95,6 +163,34 @@ class RoutinWebActivity : AppCompatActivity() {
         val restoredState = savedInstanceState?.let(binding.webRoutin::restoreState)
         if (restoredState == null) {
             binding.webRoutin.loadUrl(initialPageUrl)
+        } else if (recentGroupSyncMode) {
+            maybeStartRecentGroupSync(binding.webRoutin, binding.webRoutin.url.orEmpty())
+        } else {
+            maybeReturnToInitialPageAfterLogin(
+                binding.webRoutin,
+                binding.webRoutin.url.orEmpty()
+            )
+        }
+    }
+
+    /**
+     * 区分网页本身的加载与最近分组日志解析；登录页必须保持可操作，不能被日志提示遮挡。
+     * @param url 当前或即将展示的网页地址
+     * @param isPageLoading WebView 主页面是否仍在加载
+     */
+    private fun renderLoadingState(url: String?, isPageLoading: Boolean) {
+        val showRecentGroupLoading = recentGroupSyncMode &&
+            pendingRecentGroup == null &&
+            !isRoutinLoginPage(url)
+        binding.llRecentGroupLoading.visibility = if (showRecentGroupLoading) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        binding.progressRoutin.visibility = if (isPageLoading && !showRecentGroupLoading) {
+            View.VISIBLE
+        } else {
+            View.GONE
         }
     }
 
@@ -102,6 +198,12 @@ class RoutinWebActivity : AppCompatActivity() {
      * 优先返回网页内部历史，历史为空时才退出页面。
      */
     private fun navigateBack() {
+        if (recentGroupSyncMode) {
+            pendingRecentGroup?.let {
+                finishRecentGroupSync(it)
+                return
+            }
+        }
         if (binding.webRoutin.canGoBack()) {
             binding.webRoutin.goBack()
         } else {
@@ -273,6 +375,17 @@ class RoutinWebActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_INITIAL_PAGE_RETURN_PENDING, initialPageReturnPending)
+        outState.putBoolean(
+            STATE_CLEAR_HISTORY_AFTER_INITIAL_PAGE_RETURN,
+            clearHistoryAfterInitialPageReturn
+        )
+        pendingRecentGroup?.let { recentGroup ->
+            outState.putString(STATE_PENDING_GROUP_NAME, recentGroup.groupName)
+            outState.putDouble(STATE_PENDING_MULTIPLIER, recentGroup.multiplier)
+            outState.putString(STATE_PENDING_REQUEST_TIME, recentGroup.requestTime)
+            outState.putBoolean(STATE_RESULT_ACKNOWLEDGED, recentGroupResultAcknowledged)
+        }
         binding.webRoutin.saveState(outState)
         super.onSaveInstanceState(outState)
     }
@@ -288,8 +401,14 @@ class RoutinWebActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        initialPageReturnHandler.removeCallbacks(initialPageReturnPoll)
+        recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
         thirdPartyLoginDialog?.dismiss()
         thirdPartyLoginDialog = null
+        languageGuideDialog?.dismiss()
+        languageGuideDialog = null
+        recentGroupResultDialog?.dismiss()
+        recentGroupResultDialog = null
         disposePopupWebView()
         binding.webRoutin.apply {
             stopLoading()
@@ -301,23 +420,352 @@ class RoutinWebActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /** 首次打开 Routin 网页时提示切换中文，后续入口共用同一已读标记。 */
+    private fun showLanguageGuideIfNeeded(url: String) {
+        if (
+            !isRoutinPage(Uri.parse(url)) ||
+            isFinishing ||
+            isDestroyed ||
+            languageGuideDialog?.isShowing == true
+        ) return
+        val preferences = applicationContext.getSharedPreferences(
+            WEB_GUIDE_PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        )
+        if (preferences.getBoolean(KEY_LANGUAGE_GUIDE_SHOWN, false)) return
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.routin_web_language_guide_title)
+            .setMessage(R.string.routin_web_language_guide_message)
+            .setPositiveButton(R.string.routin_web_language_guide_confirm, null)
+            .create()
+        dialog.setOnDismissListener {
+            if (languageGuideDialog === dialog) languageGuideDialog = null
+        }
+        languageGuideDialog = dialog
+        dialog.show()
+        preferences.edit().putBoolean(KEY_LANGUAGE_GUIDE_SHOWN, true).apply()
+    }
+
+    /**
+     * 普通网页入口经过登录页后只在站点首页落地时回到最初目标，注册等流程不被中途打断。
+     * @param view 当前承载 Routin 页面的 WebView
+     * @param url 当前页面地址
+     */
+    private fun maybeReturnToInitialPageAfterLogin(view: WebView, url: String) {
+        if (recentGroupSyncMode || isFinishing || isDestroyed) return
+        val uri = Uri.parse(url)
+        if (!isRoutinPage(uri)) {
+            if (initialPageReturnPending) scheduleInitialPageReturnPoll()
+            return
+        }
+        if (isRoutinLoginPage(url)) {
+            initialPageReturnPending = true
+            scheduleInitialPageReturnPoll()
+            return
+        }
+        if (!initialPageReturnPending) return
+        if (isInitialPage(uri)) {
+            initialPageReturnPending = false
+            clearHistoryAfterInitialPageReturn = true
+            initialPageReturnHandler.removeCallbacks(initialPageReturnPoll)
+            return
+        }
+        if (!isPostLoginLandingPage(uri)) {
+            scheduleInitialPageReturnPoll()
+            return
+        }
+        initialPageReturnPending = false
+        clearHistoryAfterInitialPageReturn = true
+        initialPageReturnHandler.removeCallbacks(initialPageReturnPoll)
+        view.loadUrl(initialPageUrl)
+    }
+
+    /** 登录成功默认只会落到站点首页或账户首页，其他站内路径继续等待以保护注册流程。 */
+    private fun isPostLoginLandingPage(uri: Uri): Boolean {
+        if (!isRoutinPage(uri)) return false
+        return when (uri.path.orEmpty().trimEnd('/')) {
+            "", DASHBOARD_PATH -> true
+            else -> false
+        }
+    }
+
+    /** 目标页可能附带查询参数，只按受信任主机和规范化路径判断是否已经回跳成功。 */
+    private fun isInitialPage(uri: Uri): Boolean {
+        if (!isRoutinPage(uri)) return false
+        val targetUri = Uri.parse(initialPageUrl)
+        return uri.host.equals(targetUri.host, ignoreCase = true) &&
+            uri.path.orEmpty().trimEnd('/') == targetUri.path.orEmpty().trimEnd('/')
+    }
+
+    /** 保持单个登录状态轮询，避免页面完成回调与定时检查重复排队。 */
+    private fun scheduleInitialPageReturnPoll() {
+        initialPageReturnHandler.removeCallbacks(initialPageReturnPoll)
+        initialPageReturnHandler.postDelayed(
+            initialPageReturnPoll,
+            INITIAL_PAGE_LOGIN_POLL_DELAY_MS
+        )
+    }
+
+    /** 恢复旋转等配置变更前尚未完成的登录回跳与历史清理状态。 */
+    private fun restoreInitialPageReturnState(savedInstanceState: Bundle?) {
+        val state = savedInstanceState ?: return
+        initialPageReturnPending = state.getBoolean(STATE_INITIAL_PAGE_RETURN_PENDING, false)
+        clearHistoryAfterInitialPageReturn = state.getBoolean(
+            STATE_CLEAR_HISTORY_AFTER_INITIAL_PAGE_RETURN,
+            false
+        )
+    }
+
+    /** 登录页只等待用户操作，登录完成后再进入日志页并轮询表格中的成功记录。 */
+    private fun maybeStartRecentGroupSync(view: WebView, url: String) {
+        if (!recentGroupSyncMode || isFinishing || isDestroyed) return
+        val uri = Uri.parse(url)
+        if (!isRoutinPage(uri)) return
+        if (isRoutinLoginPage(url)) {
+            recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+            recentGroupSyncHandler.postDelayed(recentGroupSyncPoll, RECENT_GROUP_LOGIN_POLL_DELAY_MS)
+            return
+        }
+        if (uri.path?.trimEnd('/') != RECENT_GROUP_LOGS_PATH) {
+            if (!recentGroupLogsRedirected) {
+                recentGroupLogsRedirected = true
+                view.loadUrl(RECENT_GROUP_LOGS_URL)
+            }
+            return
+        }
+        recentGroupSyncAttempts = 0
+        recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+        recentGroupSyncHandler.postDelayed(recentGroupSyncPoll, RECENT_GROUP_SYNC_POLL_DELAY_MS)
+    }
+
+    /** 在网页端只读取已渲染的日志表，令牌列取分组名、详情列取独立计费倍率。 */
+    private fun queryRecentGroupFromPage() {
+        if (!recentGroupSyncMode || pendingRecentGroup != null || isFinishing || isDestroyed) return
+        val currentUrl = binding.webRoutin.url.orEmpty()
+        if (isRoutinLoginPage(currentUrl)) {
+            recentGroupSyncHandler.postDelayed(
+                recentGroupSyncPoll,
+                RECENT_GROUP_LOGIN_POLL_DELAY_MS
+            )
+            return
+        }
+        val currentPath = Uri.parse(currentUrl).path?.trimEnd('/')
+        if (currentPath != RECENT_GROUP_LOGS_PATH) {
+            if (!recentGroupLogsRedirected) {
+                recentGroupLogsRedirected = true
+                binding.webRoutin.loadUrl(RECENT_GROUP_LOGS_URL)
+            } else {
+                recentGroupSyncHandler.postDelayed(
+                    recentGroupSyncPoll,
+                    RECENT_GROUP_SYNC_POLL_DELAY_MS
+                )
+            }
+            return
+        }
+        if (recentGroupSyncAttempts >= RECENT_GROUP_SYNC_MAX_ATTEMPTS) {
+            binding.llRecentGroupLoading.visibility = View.GONE
+            MyToastD.show(getString(R.string.settings_routin_account_sync_failed))
+            return
+        }
+        recentGroupSyncAttempts += 1
+        binding.webRoutin.evaluateJavascript(RECENT_GROUP_QUERY_SCRIPT) { rawResult ->
+            if (isFinishing || isDestroyed) return@evaluateJavascript
+            val recentGroup = parseRecentGroupResult(rawResult)
+            if (recentGroup != null) {
+                completeRecentGroupSync(recentGroup)
+            } else {
+                recentGroupSyncHandler.postDelayed(
+                    recentGroupSyncPoll,
+                    RECENT_GROUP_SYNC_POLL_DELAY_MS
+                )
+            }
+        }
+    }
+
+    /** 将 WebView 的脚本结果解码为展示模型，异常或字段缺失时继续等待下一次渲染。 */
+    private fun parseRecentGroupResult(rawResult: String): RoutinRecentGroup? {
+        val json = runCatching {
+            when (val value = JSONTokener(rawResult).nextValue()) {
+                is JSONObject -> value
+                is String -> JSONObject(value)
+                else -> null
+            }
+        }.getOrNull() ?: return null
+        val groupName = json.optString("groupName").trim()
+        val requestTime = json.optString("requestTime").trim()
+        val multiplier = json.optDouble("multiplier", Double.NaN)
+        return if (groupName.isNotEmpty() && requestTime.isNotEmpty() && multiplier.isFinite()) {
+            RoutinRecentGroup(groupName, multiplier, requestTime)
+        } else {
+            null
+        }
+    }
+
+    /** 暂存不含凭证的同步摘要，网页登录会话留在 WebView Cookie 中并等待用户选择。 */
+    private fun completeRecentGroupSync(recentGroup: RoutinRecentGroup) {
+        if (pendingRecentGroup != null) return
+        recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+        pendingRecentGroup = recentGroup
+        recentGroupResultAcknowledged = false
+        showRecentGroupResultDialog(recentGroup)
+    }
+
+    /** 展示抓取摘要并等待用户决定继续查看日志还是返回设置页。 */
+    private fun showRecentGroupResultDialog(recentGroup: RoutinRecentGroup) {
+        if (
+            !recentGroupSyncMode ||
+            recentGroupResultAcknowledged ||
+            recentGroupResultDialog?.isShowing == true ||
+            isFinishing ||
+            isDestroyed
+        ) return
+        val dialog = AlertDialog.Builder(this, R.style.Theme_MyRoutin_RecentGroupAlertDialog)
+            .setTitle(R.string.settings_routin_account_sync_result_title)
+            .setMessage(formatRecentGroupResultMessage(recentGroup))
+            .setNegativeButton(R.string.settings_routin_account_sync_result_continue) { _, _ ->
+                recentGroupResultAcknowledged = true
+            }
+            .setPositiveButton(R.string.settings_routin_account_sync_result_return) { _, _ ->
+                finishRecentGroupSync(recentGroup)
+            }
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnShowListener {
+            // “继续查看”是次要操作，使用主题辅助文字色，与品牌蓝的“返回设置”拉开层级。
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(
+                getColor(R.color.plan_usage_text_secondary)
+            )
+        }
+        dialog.setOnDismissListener {
+            if (recentGroupResultDialog === dialog) recentGroupResultDialog = null
+        }
+        recentGroupResultDialog = dialog
+        dialog.show()
+        // 加载提示持续到结果弹窗真正显示，避免网页异步渲染期间出现无反馈空档。
+        renderLoadingState(binding.webRoutin.url, isPageLoading = false)
+    }
+
+    /** 将分组、倍率和请求时间组成弹窗摘要，并沿用设置页的倍率语义色。 */
+    private fun formatRecentGroupResultMessage(recentGroup: RoutinRecentGroup): CharSequence {
+        val multiplierText = getString(
+            R.string.settings_routin_account_multiplier,
+            formatMultiplier(recentGroup.multiplier)
+        )
+        val message = getString(
+            R.string.settings_routin_account_sync_result_message,
+            recentGroup.groupName,
+            multiplierText,
+            formatRequestTime(recentGroup.requestTime)
+        )
+        val multiplierStart = message.indexOf(multiplierText)
+        if (multiplierStart < 0) return message
+        val multiplierColorResId = when {
+            recentGroup.multiplier < STANDARD_QUOTA_MULTIPLIER -> R.color.plan_usage_success
+            recentGroup.multiplier > STANDARD_QUOTA_MULTIPLIER -> R.color.plan_usage_danger
+            else -> R.color.plan_usage_text_secondary
+        }
+        return SpannableString(message).apply {
+            setSpan(
+                ForegroundColorSpan(getColor(multiplierColorResId)),
+                multiplierStart,
+                multiplierStart + multiplierText.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+    }
+
+    /** 统一倍率显示，避免整数倍率在弹窗中显示成带无意义小数的文案。 */
+    private fun formatMultiplier(multiplier: Double): String {
+        return if (multiplier % 1.0 == 0.0) {
+            multiplier.toInt().toString()
+        } else {
+            String.format(Locale.US, "%.2f", multiplier)
+                .trimEnd('0')
+                .trimEnd('.')
+        }
+    }
+
+    /** 将日志页面时间压缩为弹窗摘要；无法解析时保留网页原文便于用户核对。 */
+    private fun formatRequestTime(requestTime: String): String {
+        val parsedTime = runCatching {
+            SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US).apply {
+                isLenient = false
+            }.parse(requestTime)
+        }.getOrNull() ?: return requestTime
+        val now = Calendar.getInstance()
+        val parsedCalendar = Calendar.getInstance().apply { time = parsedTime }
+        return if (
+            now.get(Calendar.ERA) == parsedCalendar.get(Calendar.ERA) &&
+            now.get(Calendar.YEAR) == parsedCalendar.get(Calendar.YEAR) &&
+            now.get(Calendar.DAY_OF_YEAR) == parsedCalendar.get(Calendar.DAY_OF_YEAR)
+        ) {
+            SimpleDateFormat("'今天' HH:mm", Locale.CHINA).format(parsedTime)
+        } else {
+            SimpleDateFormat("MM/dd HH:mm", Locale.US).format(parsedTime)
+        }
+    }
+
+    /** 将暂存结果通过 Activity Result 返回设置页，并结束当前网页容器。 */
+    private fun finishRecentGroupSync(recentGroup: RoutinRecentGroup) {
+        recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+        recentGroupResultDialog?.dismiss()
+        recentGroupResultDialog = null
+        setResult(
+            RESULT_OK,
+            Intent().apply {
+                putExtra(EXTRA_SYNC_GROUP_NAME, recentGroup.groupName)
+                putExtra(EXTRA_SYNC_MULTIPLIER, recentGroup.multiplier)
+                putExtra(EXTRA_SYNC_REQUEST_TIME, recentGroup.requestTime)
+            }
+        )
+        finish()
+    }
+
+    /** 恢复旋转等配置变更前已抓取但尚未返回设置页的结果。 */
+    private fun restorePendingRecentGroup(savedInstanceState: Bundle?) {
+        if (!recentGroupSyncMode) return
+        val state = savedInstanceState ?: return
+        val groupName = state.getString(STATE_PENDING_GROUP_NAME)?.trim().orEmpty()
+        val requestTime = state.getString(STATE_PENDING_REQUEST_TIME)?.trim().orEmpty()
+        val multiplier = state.getDouble(STATE_PENDING_MULTIPLIER, Double.NaN)
+        if (groupName.isEmpty() || requestTime.isEmpty() || !multiplier.isFinite()) return
+        pendingRecentGroup = RoutinRecentGroup(groupName, multiplier, requestTime)
+        recentGroupResultAcknowledged = state.getBoolean(
+            STATE_RESULT_ACKNOWLEDGED,
+            false
+        )
+    }
+
     /** 统一管理网页加载反馈与站内、站外导航边界，不读取或解释网页业务状态。 */
     private inner class RoutinWebViewClient : WebViewClient() {
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-            binding.progressRoutin.visibility = View.VISIBLE
+            mainFrameLoadFailed = false
+            renderLoadingState(url, isPageLoading = true)
             logRegisterPageState(url, "开始加载")
             super.onPageStarted(view, url, favicon)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            binding.progressRoutin.visibility = View.GONE
+            if (mainFrameLoadFailed) {
+                binding.progressRoutin.visibility = View.GONE
+                binding.llRecentGroupLoading.visibility = View.GONE
+            } else {
+                renderLoadingState(url, isPageLoading = false)
+            }
             if (isRoutinPage(Uri.parse(url))) {
                 installInviteRegisterClickInterceptor(view)
             }
             logRegisterPageState(url, "加载完成")
             if (!isRoutinLoginPage(url)) thirdPartyLoginRedirectPending = false
             super.onPageFinished(view, url)
+            showLanguageGuideIfNeeded(url)
+            maybeReturnToInitialPageAfterLogin(view, url)
+            if (clearHistoryAfterInitialPageReturn && isInitialPage(Uri.parse(url))) {
+                view.clearHistory()
+                clearHistoryAfterInitialPageReturn = false
+            }
+            maybeStartRecentGroupSync(view, url)
         }
 
         override fun onReceivedError(
@@ -326,7 +774,9 @@ class RoutinWebActivity : AppCompatActivity() {
             error: WebResourceError
         ) {
             if (request.isForMainFrame) {
+                mainFrameLoadFailed = true
                 binding.progressRoutin.visibility = View.GONE
+                binding.llRecentGroupLoading.visibility = View.GONE
                 MyToastD.show(getString(R.string.routin_web_load_failed))
             }
             super.onReceivedError(view, request, error)
@@ -416,6 +866,22 @@ class RoutinWebActivity : AppCompatActivity() {
             )
         }
 
+        /** 创建设置页使用的登录同步入口，网页成功后先弹出摘要确认再返回结果。 */
+        fun createRecentGroupSyncIntent(context: Context): Intent {
+            return createIntent(
+                context,
+                R.string.settings_routin_account_title,
+                RECENT_GROUP_LOGS_URL
+            ).apply {
+                putExtra(EXTRA_RECENT_GROUP_SYNC, true)
+            }
+        }
+
+        /** 同步成功返回的分组字段，原生侧只接收展示信息而不接收网页登录凭证。 */
+        const val EXTRA_SYNC_GROUP_NAME = "routin_sync_group_name"
+        const val EXTRA_SYNC_MULTIPLIER = "routin_sync_multiplier"
+        const val EXTRA_SYNC_REQUEST_TIME = "routin_sync_request_time"
+
         /**
          * 将受信任地址和本地标题封装为统一网页 Intent。
          * @param context 发起页面的上下文
@@ -431,6 +897,10 @@ class RoutinWebActivity : AppCompatActivity() {
 
         private const val DAILY_CHECK_IN_URL = "https://routin.ai/dashboard/lottery"
         private const val PLAN_SUBSCRIPTION_URL = "https://routin.ai/plans"
+        private const val RECENT_GROUP_LOGS_URL =
+            "https://routin.ai/dashboard/logs/model-requests"
+        private const val DASHBOARD_PATH = "/dashboard"
+        private const val RECENT_GROUP_LOGS_PATH = "/dashboard/logs/model-requests"
         private const val HTTPS_SCHEME = "https"
         private const val ROUTIN_DOMAIN = "routin.ai"
         private const val LOGIN_PATH = "/login"
@@ -444,6 +914,23 @@ class RoutinWebActivity : AppCompatActivity() {
         private const val ABOUT_BLANK_URL = "about:blank"
         private const val EXTRA_TITLE = "routin_web_title"
         private const val EXTRA_URL = "routin_web_url"
+        private const val WEB_GUIDE_PREFERENCES_NAME = "routin_web_guide_preferences"
+        private const val KEY_LANGUAGE_GUIDE_SHOWN = "language_guide_shown"
+        private const val EXTRA_RECENT_GROUP_SYNC = "routin_recent_group_sync"
+        private const val STATE_INITIAL_PAGE_RETURN_PENDING =
+            "routin_initial_page_return_pending"
+        private const val STATE_CLEAR_HISTORY_AFTER_INITIAL_PAGE_RETURN =
+            "routin_clear_history_after_initial_page_return"
+        private const val STATE_PENDING_GROUP_NAME = "routin_pending_group_name"
+        private const val STATE_PENDING_MULTIPLIER = "routin_pending_multiplier"
+        private const val STATE_PENDING_REQUEST_TIME = "routin_pending_request_time"
+        private const val STATE_RESULT_ACKNOWLEDGED = "routin_result_acknowledged"
+        private const val INITIAL_PAGE_LOGIN_POLL_DELAY_MS = 1_000L
+        private const val RECENT_GROUP_LOGIN_POLL_DELAY_MS = 1_000L
+        private const val RECENT_GROUP_SYNC_POLL_DELAY_MS = 500L
+        private const val RECENT_GROUP_SYNC_MAX_ATTEMPTS = 30
+        /** 1 倍为标准额度消耗基线，低于基线为节省，高于基线为额外消耗。 */
+        private const val STANDARD_QUOTA_MULTIPLIER = 1.0
 
         /**
          * 注册链接由 SPA 路由处理，因此从任意站内入口提前安装监听器，并在点击时校验当前为登录页。
@@ -483,6 +970,59 @@ class RoutinWebActivity : AppCompatActivity() {
                     window.location.assign('$INVITE_REGISTER_URL');
                 }, true);
                 return 'installed';
+            })();
+        """.trimIndent()
+
+        /**
+         * 只读取日志表当前页第一条成功记录；页面已按请求时间倒序，令牌列即为实际分组。
+         * 计费详情优先兼容“分组倍率”，并回退读取行首或分隔符后的独立“倍率”字段。
+         * 不读取或返回令牌值，避免把网页登录凭证带出 WebView。
+         */
+        private val RECENT_GROUP_QUERY_SCRIPT = """
+            (function() {
+                var rows = Array.prototype.slice.call(
+                    document.querySelectorAll('table tbody tr')
+                );
+                for (var index = 0; index < rows.length; index += 1) {
+                    var cells = rows[index].querySelectorAll('td');
+                    if (cells.length < 9) continue;
+                    var statusCell = cells[0];
+                    var statusLines = (statusCell.innerText || statusCell.textContent || '')
+                        .split(/\n+/)
+                        .map(function(line) { return line.trim(); })
+                        .filter(Boolean);
+                    // 优先使用站点语义样式，文字仅作中英文页面的兼容兜底。
+                    var hasSuccessClass = statusCell.querySelector('.dashboard-success-text') !== null;
+                    var hasSuccessText = /成功|success/i.test(statusLines.join(' '));
+                    if (!hasSuccessClass && !hasSuccessText) continue;
+                    var requestTime = statusLines.find(function(line) {
+                        return /^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(line);
+                    }) || '';
+                    var tokenLines = (cells[1].innerText || cells[1].textContent || '')
+                        .split(/\n+/)
+                        .map(function(line) { return line.trim(); })
+                        .filter(Boolean);
+                    var groupName = tokenLines.length > 0
+                        ? tokenLines[tokenLines.length - 1].replace(/^--\s*/, '').trim()
+                        : '';
+                    if (!groupName || groupName === '--' || !requestTime) continue;
+                    var detailText = cells[8].innerText || cells[8].textContent || '';
+                    var groupMultiplierMatch = detailText.match(
+                        /(?:分组倍率|Group\s+Multiplier)\s*[=:：]\s*([0-9]+(?:[.,][0-9]+)?)/i
+                    ) || detailText.match(
+                        /(?:^|[|\n])\s*(?:倍率|Multiplier)\s*[=:：]\s*([0-9]+(?:[.,][0-9]+)?)/i
+                    );
+                    var multiplier = groupMultiplierMatch
+                        ? Number(groupMultiplierMatch[1].replace(',', '.'))
+                        : NaN;
+                    if (!isFinite(multiplier)) continue;
+                    return {
+                        groupName: groupName,
+                        multiplier: multiplier,
+                        requestTime: requestTime
+                    };
+                }
+                return null;
             })();
         """.trimIndent()
     }

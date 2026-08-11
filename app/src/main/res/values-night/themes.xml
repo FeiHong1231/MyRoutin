@@ -37,4 +37,17 @@
         <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
         <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
     </style>
+
+    <!-- 深色模式使用提亮后的品牌蓝作为主操作按钮颜色，保证与深色弹窗表面对比清晰。 -->
+    <style name="Theme.MyRoutin.RecentGroupAlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_primary</item>
+        <item name="colorSecondary">@color/plan_usage_brand_primary</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_primary</item>
+        <item name="colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
+    </style>
 </resources>

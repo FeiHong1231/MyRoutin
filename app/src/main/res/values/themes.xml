@@ -22,4 +22,17 @@
         <item name="colorAccent">@color/plan_usage_brand_variant</item>
         <item name="android:colorAccent">@color/plan_usage_brand_variant</item>
     </style>
+
+    <!-- 最近分组结果弹窗沿用页面品牌色，确保浅色模式按钮不回退到默认紫色。 -->
+    <style name="Theme.MyRoutin.RecentGroupAlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_variant</item>
+        <item name="colorSecondary">@color/plan_usage_brand_variant</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_variant</item>
+        <item name="colorAccent">@color/plan_usage_brand_variant</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_variant</item>
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
+    </style>
 </resources>

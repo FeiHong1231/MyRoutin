@@ -28,7 +28,7 @@ internal class ResumableApkDownloader(
     @Volatile
     private var activeConnection: HttpURLConnection? = null
 
-    /** 被用户暂停的连接单独标记，只有该退出路径允许保留未完成分片。 */
+    /** 被用户暂停的连接单独标记，用于区分自动暂停与显式取消。 */
     @Volatile
     private var pausedConnection: HttpURLConnection? = null
 
@@ -60,7 +60,7 @@ internal class ResumableApkDownloader(
             activeConnection = downloadConnection
             var responseCode = downloadConnection.responseCode
             if (responseCode !in HTTP_SUCCESS_RANGE) {
-                throw UpdateHttpException()
+                throw UpdateHttpException(responseCode)
             }
             var shouldAppend = resumeBytes > 0L &&
                 responseCode == HTTP_PARTIAL_CONTENT &&
@@ -74,7 +74,7 @@ internal class ResumableApkDownloader(
             if (resumeBytes > 0L && responseCode == HTTP_PARTIAL_CONTENT && !shouldAppend) {
                 // 无效 206 不能写入旧分片，改为无 Range 的完整请求重新确认远端实体。
                 if (isPauseRequestedFor(downloadConnection)) {
-                    throw UpdateHttpException()
+                    throw UpdateHttpException(responseCode)
                 }
                 val rejectedConnection = downloadConnection
                 fileStore.deletePartial(files)
@@ -92,7 +92,7 @@ internal class ResumableApkDownloader(
                 downloadConnection = replacementConnection
                 responseCode = downloadConnection.responseCode
                 if (responseCode !in HTTP_SUCCESS_RANGE || responseCode == HTTP_PARTIAL_CONTENT) {
-                    throw UpdateHttpException()
+                    throw UpdateHttpException(responseCode)
                 }
                 shouldAppend = false
             }
@@ -104,7 +104,7 @@ internal class ResumableApkDownloader(
             }
             if (resumeBytes == 0L && responseCode == HTTP_PARTIAL_CONTENT) {
                 // 未请求 Range 却收到部分内容，禁止把不完整响应当作完整 APK。
-                throw UpdateHttpException()
+                throw UpdateHttpException(responseCode)
             }
             fileStore.persistResponseEntityTag(downloadConnection, files)
             val contentRange = UpdateResumeProtocol.parseContentRange(
@@ -115,6 +115,10 @@ internal class ResumableApkDownloader(
                 ?: downloadConnection.contentLengthLong.takeIf { it > 0L }?.let { contentLength ->
                     if (shouldAppend) downloadedBytes + contentLength else contentLength
                 }
+            if (downloadedBytes > 0L) {
+                // 续传建立后立即同步磁盘真实进度，不等待下一批 64 KB 才纠正页面显示。
+                onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
+            }
             val integritySession = integrityVerifier.createSession(
                 files.temporaryFile.takeIf { shouldAppend }
             )
@@ -156,9 +160,14 @@ internal class ResumableApkDownloader(
                     UpdateDownloadProgress(downloadedBytes, totalBytes)
                 )
             }
-            fileStore.deletePartial(files)
             if (!coroutineContext.isActive) {
+                // 显式取消即使先表现为连接异常也必须清理分片，不能误当作可恢复断网。
+                fileStore.deletePartial(files)
                 throw CancellationException()
+            }
+            val shouldKeepPartial = downloadedBytes > 0L && exception.shouldKeepPartialDownload()
+            if (!shouldKeepPartial) {
+                fileStore.deletePartial(files)
             }
             return AppUpdateDownloadResult.Failure(exception.toDownloadFailureReason())
         } finally {
@@ -200,6 +209,17 @@ internal class ResumableApkDownloader(
         }
     }
 
+    /** 网络中断、超时和服务端临时错误允许保留已写入分片，协议或完整性错误必须重新下载。 */
+    private fun Throwable.shouldKeepPartialDownload(): Boolean {
+        return when (this) {
+            is UpdateIntegrityException -> false
+            is UpdateHttpException -> responseCode != null && responseCode in HTTP_SERVER_ERROR_RANGE
+            is SocketTimeoutException -> true
+            is IOException -> true
+            else -> false
+        }
+    }
+
     /** 判断当前退出是否由用户暂停触发，只有该分支可以保留未完成文件。 */
     private fun isPauseRequestedFor(connection: HttpURLConnection?): Boolean {
         return connection != null && pausedConnection === connection
@@ -212,6 +232,7 @@ internal class ResumableApkDownloader(
         private const val PROGRESS_REPORT_INTERVAL_BYTES = 64 * 1024L
         private const val HTTP_PARTIAL_CONTENT = 206
         private val HTTP_SUCCESS_RANGE = 200..299
+        private val HTTP_SERVER_ERROR_RANGE = 500..599
     }
 }
 

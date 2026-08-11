@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- 仅在“用量”首页显示，由 Activity 根据当前一级导航控制可见性。 -->
+    <item
+        android:id="@+id/action_daily_check_in"
+        android:icon="@drawable/ic_daily_check_in"
+        android:title="@string/menu_daily_check_in"
+        app:showAsAction="always" />
+</menu>

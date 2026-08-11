@@ -33,7 +33,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
     /** 检查序号用于忽略已取消旧请求的迟到结果，避免覆盖用户刚发起的手动检查状态。 */
     private var checkRequestToken = 0L
 
-    /** 下载任务只允许存在一个，离开页面时会主动取消而不会继续后台下载。 */
+    /** 下载任务只允许存在一个，页面进入后台时会自动暂停而不会继续后台下载。 */
     private var downloadUpdateJob: Job? = null
 
     private val _uiState = MutableStateFlow(AppUpdateUiState())
@@ -131,9 +131,9 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
             is AppUpdateCardState.DownloadFailed -> currentCardState.update
             else -> return
         }
-        // 恢复下载必须沿用暂停时已渲染的进度，避免 Range 请求建立前圆环短暂回退到 0%。
+        // 主动暂停沿用内存进度，失败重试或进程重建则从磁盘分片恢复，避免圆环回退到 0%。
         val initialProgress = (currentCardState as? AppUpdateCardState.Paused)?.progress
-            ?: UpdateDownloadProgress(0L, update.apkSizeBytes)
+            ?: repository.readCachedDownloadProgress(update)
         downloadUpdateJob?.cancel()
         updateUiState {
             it.copy(
@@ -250,13 +250,21 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** 页面进入后台时终止前台下载，但保留同一版本的下载入口供用户返回后重新开始。 */
+    /** 页面进入后台时自动暂停并保留分片，息屏返回后可从原进度继续下载。 */
     fun stopForegroundDownload() {
         val downloadingState = _uiState.value.cardState as? AppUpdateCardState.Downloading ?: return
-        repository.cancelForegroundDownload()
-        downloadUpdateJob?.cancel()
-        repository.deletePartialUpdate(downloadingState.update)
-        updateUiState { it.copy(cardState = AppUpdateCardState.Available(downloadingState.update)) }
+        if (downloadUpdateJob?.isActive != true) {
+            return
+        }
+        repository.pauseForegroundDownload()
+        updateUiState {
+            it.copy(
+                cardState = AppUpdateCardState.Paused(
+                    downloadingState.update,
+                    downloadingState.progress
+                )
+            )
+        }
     }
 
     /** 将一次性事件写入缓冲通道，页面短暂重建时继续保留待处理事件。 */

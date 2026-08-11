@@ -81,7 +81,7 @@ internal class UpdateDownloadFileStore(
     }
 
     /**
-     * 暂停以外的退出路径同时删除 APK 分片和实体校验器，禁止下次使用孤立状态续传。
+     * 显式取消或不可恢复错误同时删除 APK 分片和实体校验器，禁止下次使用孤立状态续传。
      * @param files 当前版本对应的下载文件
      */
     fun deletePartial(files: UpdateDownloadFiles) {
@@ -90,7 +90,7 @@ internal class UpdateDownloadFileStore(
     }
 
     /**
-     * 删除指定版本的分片状态，关闭暂停卡片或离开下载流程时调用。
+     * 删除指定版本的分片状态，用户明确关闭暂停卡片时调用。
      * @param versionCode 当前更新版本号
      */
     fun deletePartial(versionCode: Int) {

@@ -6,9 +6,11 @@
     <string name="navigation_models">模型数据</string>
     <string name="navigation_settings">设置</string>
     <string name="settings_preference_section">偏好设置</string>
+    <string name="settings_routin_service_section">Routin 服务</string>
     <string name="settings_current_version">当前版本 v%1$s</string>
     <string name="menu_check_update">检查更新</string>
     <string name="menu_appearance">外观</string>
+    <string name="menu_daily_check_in">每日签到</string>
     <string name="appearance_follow_system">跟随系统</string>
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>
@@ -28,6 +30,17 @@
     <string name="action_query_and_add">查询并添加</string>
     <string name="action_refresh_all">刷新全部</string>
     <string name="action_refresh">刷新</string>
+
+    <string name="daily_check_in_title">每日签到</string>
+    <string name="plan_subscription_title">套餐订阅</string>
+    <string name="plan_subscription_summary">查看套餐与扫码订阅</string>
+    <string name="routin_web_content">Routin 网页内容</string>
+    <string name="routin_web_loading">正在加载网页</string>
+    <string name="routin_web_load_failed">页面加载失败，请检查网络后重试</string>
+    <string name="routin_web_open_external_failed">无法打开外部链接</string>
+    <string name="third_party_login_password_title">请使用密码登录</string>
+    <string name="third_party_login_password_message">App 内嵌页暂不支持第三方账号登录。请在当前页面切换到“密码登录”，使用用户名或邮箱和密码登录。</string>
+    <string name="third_party_login_use_password">使用密码登录</string>
 
     <string name="plan_usage_key_count_empty">我的 Key（0）</string>
     <string name="plan_usage_key_count">我的 Key（%1$d）</string>

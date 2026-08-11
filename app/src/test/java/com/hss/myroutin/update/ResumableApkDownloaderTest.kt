@@ -17,7 +17,7 @@ import org.junit.rules.TemporaryFolder
 import java.security.MessageDigest
 
 /**
- * 说明：通过本地 HTTP 服务验证 APK 首次下载、Range/ETag 续传、完整回退和异常文件清理。
+ * 说明：通过本地 HTTP 服务验证 APK 首次下载、Range/ETag 续传、错误恢复和异常文件清理。
  *
  * @作者 huangssh
  * @版本 2.3
@@ -73,12 +73,16 @@ class ResumableApkDownloaderTest {
             response(206, apkBytes.copyOfRange(5, apkBytes.size), entityTag = "\"release-v1\"")
                 .addHeader("Content-Range", "bytes 5-9/10")
         )
+        val progressValues = mutableListOf<UpdateDownloadProgress>()
 
-        val result = downloader.download(updateFor(apkBytes)) {}
+        val result = downloader.download(updateFor(apkBytes)) { progress ->
+            progressValues.add(progress)
+        }
 
         assertTrue(result is AppUpdateDownloadResult.Success)
         result as AppUpdateDownloadResult.Success
         assertArrayEquals(apkBytes, result.apkFile.readBytes())
+        assertEquals(UpdateDownloadProgress(5L, 10L), progressValues.first())
         val request = server.takeRequest()
         assertEquals("bytes=5-", request.getHeader("Range"))
         assertEquals("\"release-v1\"", request.getHeader("If-Range"))
@@ -140,9 +144,25 @@ class ResumableApkDownloaderTest {
     }
 
     @Test
-    fun nonSuccessResponse_deletesPartialAndEntityTag() = runBlocking {
+    fun serverError_preservesPartialAndEntityTagForRetry() = runBlocking {
         val files = seedPartial("part".toByteArray(), "\"release-v1\"")
         server.enqueue(MockResponse().setResponseCode(500))
+
+        val result = downloader.download(updateFor("complete".toByteArray())) {}
+
+        assertEquals(
+            AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.NETWORK),
+            result
+        )
+        assertTrue(files.temporaryFile.exists())
+        assertTrue(files.entityTagFile.exists())
+        assertFalse(files.targetFile.exists())
+    }
+
+    @Test
+    fun clientError_deletesPartialAndEntityTagBeforeRetry() = runBlocking {
+        val files = seedPartial("part".toByteArray(), "\"release-v1\"")
+        server.enqueue(MockResponse().setResponseCode(404))
 
         val result = downloader.download(updateFor("complete".toByteArray())) {}
 

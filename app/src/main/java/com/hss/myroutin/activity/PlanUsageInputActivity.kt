@@ -1,6 +1,8 @@
 package com.hss.myroutin.activity
 
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
@@ -52,6 +54,40 @@ class PlanUsageInputActivity : AppCompatActivity() {
     }
 
     /**
+     * 为默认用量首页提供快捷签到入口；其他一级页不展示，避免与页面业务操作混淆。
+     * @param menu 顶部 ActionBar 的操作菜单
+     */
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main_navigation, menu)
+        return true
+    }
+
+    /**
+     * 仅在首页显示签到图标，切换到模型数据或设置页时收起该入口。
+     * @param menu 顶部 ActionBar 的操作菜单
+     */
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.action_daily_check_in)?.isVisible =
+            selectedNavigationItemId == R.id.navigation_usage
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    /**
+     * 处理首页工具栏操作；签到页独立承载 WebView，避免将网页生命周期耦合到首页 Fragment。
+     * @param item 用户点击的工具栏菜单项
+     */
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_daily_check_in -> {
+                startActivity(RoutinWebActivity.createDailyCheckInIntent(this))
+                true
+            }
+
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    /**
      * 建立三个固定一级入口；Fragment 使用 add/hide 切换，保留输入和列表位置。
      * @param savedInstanceState 用于恢复配置变更前的导航位置
      */
@@ -79,6 +115,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         val destination = resolveDestination(itemId) ?: return
         selectedNavigationItemId = itemId
         supportActionBar?.title = getString(destination.titleResId)
+        invalidateOptionsMenu()
 
         val fragmentManager = supportFragmentManager
         val selectedFragment = fragmentManager.findFragmentByTag(destination.tag)
@@ -230,7 +267,7 @@ class PlanUsageInputActivity : AppCompatActivity() {
         }
     }
 
-    /** 应用进入后台后终止前台下载，保留可重试状态避免误触后台长任务。 */
+    /** 应用进入后台后自动暂停下载并保留分片，息屏返回时可继续原有进度。 */
     override fun onStop() {
         if (!isChangingConfigurations) {
             appUpdateViewModel.stopForegroundDownload()

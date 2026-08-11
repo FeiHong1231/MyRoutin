@@ -14,6 +14,7 @@ import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.R
 import com.hss.myroutin.activity.AppUpdateCardRenderer
 import com.hss.myroutin.activity.PlanUsageInputActivity
+import com.hss.myroutin.activity.RoutinWebActivity
 import com.hss.myroutin.appearance.AppAppearancePreference
 import com.hss.myroutin.appearance.AppearanceMode
 import com.hss.myroutin.databinding.FragmentSettingsBinding
@@ -67,6 +68,9 @@ class SettingsFragment : Fragment() {
         binding.llAppearanceSetting.setOnClickListener { showAppearanceDialog() }
         binding.llCheckUpdateSetting.setOnClickListener {
             appUpdateViewModel.checkForUpdate(isManual = true)
+        }
+        binding.llPlanSubscriptionSetting.setOnClickListener {
+            startActivity(RoutinWebActivity.createPlanSubscriptionIntent(requireContext()))
         }
         binding.updateCard.btnUpdateAction.setOnClickListener {
             (requireActivity() as PlanUsageInputActivity).handleUpdateAction()

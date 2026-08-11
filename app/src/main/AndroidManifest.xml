@@ -28,6 +28,11 @@
         </provider>
 
         <activity
+            android:name=".activity.RoutinWebActivity"
+            android:label="@string/app_name"
+            android:parentActivityName=".activity.PlanUsageInputActivity" />
+
+        <activity
             android:name=".activity.PlanUsageInputActivity"
             android:exported="true"
             android:label="@string/app_name">

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 日历勾选图标：入口只表达“前往签到”，不表达原生侧的签到状态。 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M19,4h-1V2h-2v2H8V2H6v2H5C3.89,4 3,4.9 3,6v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V6c0,-1.1 -0.9,-2 -2,-2zM19,20H5V9h14v11zM19,7H5V6h14v1zM10.2,16.8l-2.3,-2.3 1.4,-1.4 0.9,0.9 4.5,-4.5 1.4,1.4 -5.9,5.9z" />
+</vector>

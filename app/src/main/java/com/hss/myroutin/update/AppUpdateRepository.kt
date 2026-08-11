@@ -48,9 +48,6 @@ class AppUpdateRepository(
             }
         } catch (exception: CancellationException) {
             throw exception
-        } catch (exception: UpdateManifestNotFoundException) {
-            // 兼容首个未附带 update.json 的旧 Release，不能把“无更新”误报为网络故障。
-            AppUpdateCheckResult.NoUpdate
         } catch (exception: Exception) {
             AppUpdateCheckResult.Failure
         }
@@ -69,7 +66,24 @@ class AppUpdateRepository(
         apkDownloader.download(update, onProgress)
     }
 
-    /** 页面离开时主动断开前台下载连接，确保下载不会在后台继续。 */
+    /**
+     * 从磁盘分片读取当前版本的真实下载进度，页面重建或失败重试时不从 0 开始展示。
+     * @param update 当前准备下载的更新清单
+     * @return 本地已保存字节数和清单声明的总字节数
+     */
+    fun readCachedDownloadProgress(update: AppUpdateManifest): UpdateDownloadProgress {
+        val downloadedBytes = fileStore.filesFor(update.versionCode)
+            .temporaryFile
+            .takeIf { it.isFile }
+            ?.length()
+            ?: 0L
+        return UpdateDownloadProgress(
+            downloadedBytes = downloadedBytes,
+            totalBytes = update.apkSizeBytes
+        )
+    }
+
+    /** 用户取消或 ViewModel 销毁时主动断开连接，取消路径不保留未完成分片。 */
     fun cancelForegroundDownload() {
         apkDownloader.cancel()
     }
@@ -80,7 +94,7 @@ class AppUpdateRepository(
     }
 
     /**
-     * 关闭暂停卡片或离开下载流程时删除指定版本的部分文件，避免缓存残留无用安装包。
+     * 用户关闭暂停卡片时删除指定版本的部分文件，避免缓存残留无用安装包。
      * @param update 当前下载的更新清单，用于定位受限的缓存文件名
      */
     fun deletePartialUpdate(update: AppUpdateManifest) {

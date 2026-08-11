@@ -28,11 +28,8 @@ internal class AppUpdateManifestClient(
         val connection = connectionFactory.open(manifestUrl)
         activeConnection = connection
         try {
-            if (connection.responseCode == HTTP_NOT_FOUND) {
-                throw UpdateManifestNotFoundException()
-            }
             if (connection.responseCode !in HTTP_SUCCESS_RANGE) {
-                throw UpdateHttpException()
+                throw UpdateHttpException(connection.responseCode)
             }
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             return parse(body)
@@ -83,7 +80,6 @@ internal class AppUpdateManifestClient(
             "https://github.com/huangssh/MyRoutin/releases/download/"
         private const val INVALID_VERSION_CODE = -1
         private const val INVALID_APK_SIZE = -1L
-        private const val HTTP_NOT_FOUND = 404
         private val HTTP_SUCCESS_RANGE = 200..299
         private val SHA_256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
     }
@@ -92,8 +88,8 @@ internal class AppUpdateManifestClient(
 /** 更新清单字段缺失或来源异常时使用，禁止继续处理该远端数据。 */
 internal class UpdateManifestException : IllegalArgumentException()
 
-/** 旧版 Release 未附带更新清单时使用，兼容上线更新功能前已发布的安装包。 */
-internal class UpdateManifestNotFoundException : IOException()
-
-/** 清单或 APK 请求返回非成功状态码时使用。 */
-internal class UpdateHttpException : IOException()
+/**
+ * 清单或 APK 请求返回非成功状态码时使用，下载层据此区分可重试的服务端错误。
+ * @param responseCode 服务端 HTTP 状态码，连接尚未取得响应时为 null
+ */
+internal class UpdateHttpException(val responseCode: Int? = null) : IOException()

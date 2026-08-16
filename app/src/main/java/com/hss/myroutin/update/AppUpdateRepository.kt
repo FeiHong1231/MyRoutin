@@ -1,12 +1,16 @@
 package com.hss.myroutin.update
 
 import android.content.Context
+import android.util.Log
 import com.hss.myroutin.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/** 更新链路统一日志 Tag，便于按一次检查串联清单与下载日志。 */
+internal const val UPDATE_LOG_TAG = "MyRoutinUpdate"
 
 /**
  * 说明：GitHub Release 更新入口，编排清单检查、前台 APK 下载及缓存清理，不直接处理协议和文件流。
@@ -36,19 +40,46 @@ class AppUpdateRepository(
 
     /**
      * 获取最新稳定版更新清单；仅当远端 versionCode 更高时才返回可更新结果。
+     * @param requestId 本次检查的关联编号，用于串联 UI、清单请求和结果日志
      * @return 检查结果，网络失败与“已是最新”在类型层面明确区分
      */
-    suspend fun checkForUpdate(): AppUpdateCheckResult = withContext(ioDispatcher) {
+    suspend fun checkForUpdate(requestId: Long = System.currentTimeMillis()): AppUpdateCheckResult =
+        withContext(ioDispatcher) {
+        Log.d(
+            UPDATE_LOG_TAG,
+            "[$requestId] 开始检查更新：installedVersionCode=${BuildConfig.VERSION_CODE}, " +
+                "manifestUrl=$updateManifestUrl"
+        )
         try {
-            val update = manifestClient.request(updateManifestUrl)
+            val update = manifestClient.request(updateManifestUrl, requestId)
             if (update.versionCode > BuildConfig.VERSION_CODE) {
+                Log.i(
+                    UPDATE_LOG_TAG,
+                    "[$requestId] 检查更新成功：result=available, " +
+                        "remoteVersionCode=${update.versionCode}, " +
+                        "remoteVersionName=${update.versionName}, " +
+                        "apkSizeBytes=${update.apkSizeBytes}, " +
+                        "sha256Present=${update.sha256.isNotBlank()}"
+                )
                 AppUpdateCheckResult.UpdateAvailable(update)
             } else {
+                Log.i(
+                    UPDATE_LOG_TAG,
+                    "[$requestId] 检查更新成功：result=no_update, " +
+                        "remoteVersionCode=${update.versionCode}, " +
+                        "remoteVersionName=${update.versionName}"
+                )
                 AppUpdateCheckResult.NoUpdate
             }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
+            Log.e(
+                UPDATE_LOG_TAG,
+                "[$requestId] 检查更新失败：exception=${exception::class.java.name}, " +
+                    "message=${exception.message.orEmpty()}",
+                exception
+            )
             AppUpdateCheckResult.Failure
         }
     }
@@ -57,13 +88,40 @@ class AppUpdateRepository(
      * 将受信任更新下载到应用缓存目录，并在写入完成后校验 SHA-256 才暴露安装文件。
      * @param update 已通过清单校验的更新信息
      * @param onProgress 前台页面使用的真实字节进度回调
+     * @param requestId 本次下载的关联编号，用于串联 UI、HTTP 和结果日志
      * @return 下载、校验和落盘后的结果
      */
     suspend fun downloadUpdate(
         update: AppUpdateManifest,
-        onProgress: (UpdateDownloadProgress) -> Unit
+        onProgress: (UpdateDownloadProgress) -> Unit,
+        requestId: Long = System.currentTimeMillis()
     ): AppUpdateDownloadResult = withContext(ioDispatcher) {
-        apkDownloader.download(update, onProgress)
+        Log.d(
+            UPDATE_LOG_TAG,
+            "[$requestId] 开始下载更新：versionCode=${update.versionCode}, " +
+                "versionName=${update.versionName}, apkSizeBytes=${update.apkSizeBytes}, " +
+                "sha256Present=${update.sha256.isNotBlank()}"
+        )
+        val result = apkDownloader.download(update, onProgress, requestId)
+        when (result) {
+            is AppUpdateDownloadResult.Success -> Log.i(
+                UPDATE_LOG_TAG,
+                "[$requestId] 下载更新成功：versionCode=${update.versionCode}, " +
+                    "fileBytes=${result.apkFile.length()}"
+            )
+            is AppUpdateDownloadResult.Paused -> Log.i(
+                UPDATE_LOG_TAG,
+                "[$requestId] 下载更新已暂停：versionCode=${update.versionCode}, " +
+                    "downloadedBytes=${result.progress.downloadedBytes}, " +
+                    "totalBytes=${result.progress.totalBytes}"
+            )
+            is AppUpdateDownloadResult.Failure -> Log.e(
+                UPDATE_LOG_TAG,
+                "[$requestId] 下载更新失败：versionCode=${update.versionCode}, " +
+                    "reason=${result.reason}"
+            )
+        }
+        result
     }
 
     /**
@@ -85,6 +143,7 @@ class AppUpdateRepository(
 
     /** 用户取消或 ViewModel 销毁时主动断开连接，取消路径不保留未完成分片。 */
     fun cancelForegroundDownload() {
+        Log.d(UPDATE_LOG_TAG, "取消前台下载：active=${apkDownloader.isActive()}")
         apkDownloader.cancel()
     }
 
@@ -103,6 +162,7 @@ class AppUpdateRepository(
 
     /** 用户关闭手动检查提示或再次发起检查时，立即中断尚未完成的清单请求。 */
     fun cancelUpdateCheck() {
+        Log.d(UPDATE_LOG_TAG, "取消更新清单检查")
         manifestClient.cancel()
     }
 

@@ -1,6 +1,7 @@
 package com.hss.myroutin.update
 
 import android.app.Application
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -79,8 +80,10 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         checkUpdateJob?.cancel()
         updateUiState { it.copy(isChecking = true, isManualChecking = isManual) }
         val requestToken = ++checkRequestToken
+        val requestId = System.currentTimeMillis()
+        Log.d(UPDATE_LOG_TAG, "[$requestId] UI 触发检查更新：manual=$isManual")
         checkUpdateJob = viewModelScope.launch {
-            val result = repository.checkForUpdate()
+            val result = repository.checkForUpdate(requestId)
             if (requestToken != checkRequestToken) {
                 return@launch
             }
@@ -113,6 +116,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 AppUpdateCheckResult.Failure -> {
+                    Log.w(UPDATE_LOG_TAG, "[$requestId] UI 收到检查失败：manual=$isManual")
                     updateUiState { it.copy(isChecking = false, isManualChecking = false) }
                     if (isManual) {
                         sendEvent(AppUpdateUiEvent.ShowToast(getString(R.string.update_check_failed_toast)))
@@ -143,9 +147,15 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             )
         }
+        val requestId = System.currentTimeMillis()
+        Log.d(
+            UPDATE_LOG_TAG,
+            "[$requestId] UI 触发下载更新：versionCode=${update.versionCode}, " +
+                "versionName=${update.versionName}"
+        )
         downloadUpdateJob = viewModelScope.launch {
             when (
-                val result = repository.downloadUpdate(update) { progress ->
+                val result = repository.downloadUpdate(update, { progress ->
                     updateUiState { state ->
                         val downloadingState = state.cardState as? AppUpdateCardState.Downloading
                         if (downloadingState?.update == update) {
@@ -154,7 +164,7 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                             state
                         }
                     }
-                }
+                }, requestId)
             ) {
                 is AppUpdateDownloadResult.Success -> {
                     updateUiState {
@@ -164,6 +174,11 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 is AppUpdateDownloadResult.Failure -> {
+                    Log.w(
+                        UPDATE_LOG_TAG,
+                        "[$requestId] UI 收到下载失败：versionCode=${update.versionCode}, " +
+                            "reason=${result.reason}"
+                    )
                     updateUiState {
                         it.copy(
                             cardState = AppUpdateCardState.DownloadFailed(
@@ -175,6 +190,12 @@ class AppUpdateViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 is AppUpdateDownloadResult.Paused -> {
+                    Log.d(
+                        UPDATE_LOG_TAG,
+                        "[$requestId] UI 收到下载暂停：versionCode=${update.versionCode}, " +
+                            "downloadedBytes=${result.progress.downloadedBytes}, " +
+                            "totalBytes=${result.progress.totalBytes}"
+                    )
                     updateUiState { state ->
                         when (val cardState = state.cardState) {
                             is AppUpdateCardState.Downloading -> {

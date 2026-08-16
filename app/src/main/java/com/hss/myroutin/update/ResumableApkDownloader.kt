@@ -1,5 +1,6 @@
 package com.hss.myroutin.update
 
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
@@ -36,15 +37,23 @@ internal class ResumableApkDownloader(
      * 下载并校验指定更新；只有 SHA-256 通过后才把临时文件发布为可安装 APK。
      * @param update 已通过清单校验的更新信息
      * @param onProgress 前台页面使用的真实字节进度回调
+     * @param requestId 本次下载的关联编号，用于串联 HTTP、续传和结果日志
      * @return 下载、暂停或失败结果
      */
     suspend fun download(
         update: AppUpdateManifest,
-        onProgress: (UpdateDownloadProgress) -> Unit
+        onProgress: (UpdateDownloadProgress) -> Unit,
+        requestId: Long = System.currentTimeMillis()
     ): AppUpdateDownloadResult {
         val files = try {
             fileStore.prepare(update.versionCode)
         } catch (exception: UpdateDirectoryException) {
+            Log.e(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 下载准备失败：versionCode=${update.versionCode}, " +
+                    "exception=${exception::class.java.name}",
+                exception
+            )
             return AppUpdateDownloadResult.Failure(AppUpdateDownloadFailureReason.DIRECTORY_UNAVAILABLE)
         }
         var connection: HttpURLConnection? = null
@@ -55,10 +64,22 @@ internal class ResumableApkDownloader(
             val cachedEntityTag = files.entityTagFile
                 .takeIf { resumeBytes > 0L }
                 ?.let { fileStore.readCachedEntityTag(files) }
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 请求开始：versionCode=${update.versionCode}, " +
+                    "resumeBytes=$resumeBytes, cachedEntityTag=${cachedEntityTag != null}, " +
+                    "expectedSize=${update.apkSizeBytes}"
+            )
             var downloadConnection = connectionFactory.open(update.apkUrl, resumeBytes, cachedEntityTag)
             connection = downloadConnection
             activeConnection = downloadConnection
             var responseCode = downloadConnection.responseCode
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 响应：http=$responseCode, contentLength=${downloadConnection.contentLengthLong}, " +
+                    "contentRange=${downloadConnection.getHeaderField(CONTENT_RANGE_HEADER).orEmpty()}, " +
+                    "etagPresent=${!downloadConnection.getHeaderField(ENTITY_TAG_HEADER).isNullOrBlank()}"
+            )
             if (responseCode !in HTTP_SUCCESS_RANGE) {
                 throw UpdateHttpException(responseCode)
             }
@@ -91,6 +112,10 @@ internal class ResumableApkDownloader(
                 rejectedConnection.disconnect()
                 downloadConnection = replacementConnection
                 responseCode = downloadConnection.responseCode
+                Log.w(
+                    UPDATE_LOG_TAG,
+                    "[$requestId] APK 续传响应无效，已重试完整请求：http=$responseCode"
+                )
                 if (responseCode !in HTTP_SUCCESS_RANGE || responseCode == HTTP_PARTIAL_CONTENT) {
                     throw UpdateHttpException(responseCode)
                 }
@@ -119,6 +144,11 @@ internal class ResumableApkDownloader(
                 // 续传建立后立即同步磁盘真实进度，不等待下一批 64 KB 才纠正页面显示。
                 onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
             }
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 下载实体确认：append=$shouldAppend, " +
+                    "downloadedBytes=$downloadedBytes, totalBytes=$totalBytes"
+            )
             val integritySession = integrityVerifier.createSession(
                 files.temporaryFile.takeIf { shouldAppend }
             )
@@ -145,17 +175,37 @@ internal class ResumableApkDownloader(
             coroutineContext.ensureActive()
             onProgress(UpdateDownloadProgress(downloadedBytes, totalBytes))
             if (!integritySession.matches(update.sha256)) {
+                Log.e(
+                    UPDATE_LOG_TAG,
+                    "[$requestId] APK 摘要校验失败：versionCode=${update.versionCode}, " +
+                        "downloadedBytes=$downloadedBytes, expectedSize=${update.apkSizeBytes}"
+                )
                 throw UpdateIntegrityException()
             }
             fileStore.publishVerifiedDownload(files)
+            Log.i(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 下载并校验成功：versionCode=${update.versionCode}, " +
+                    "downloadedBytes=$downloadedBytes"
+            )
             return AppUpdateDownloadResult.Success(files.targetFile)
         } catch (exception: CancellationException) {
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 下载取消：versionCode=${update.versionCode}, " +
+                    "downloadedBytes=$downloadedBytes, paused=${isPauseRequestedFor(connection)}"
+            )
             if (!isPauseRequestedFor(connection)) {
                 fileStore.deletePartial(files)
             }
             throw exception
         } catch (exception: Exception) {
             if (isPauseRequestedFor(connection)) {
+                Log.i(
+                    UPDATE_LOG_TAG,
+                    "[$requestId] APK 下载暂停：versionCode=${update.versionCode}, " +
+                        "downloadedBytes=$downloadedBytes, totalBytes=$totalBytes"
+                )
                 return AppUpdateDownloadResult.Paused(
                     UpdateDownloadProgress(downloadedBytes, totalBytes)
                 )
@@ -166,10 +216,19 @@ internal class ResumableApkDownloader(
                 throw CancellationException()
             }
             val shouldKeepPartial = downloadedBytes > 0L && exception.shouldKeepPartialDownload()
+            val failureReason = exception.toDownloadFailureReason()
+            Log.e(
+                UPDATE_LOG_TAG,
+                "[$requestId] APK 下载异常：versionCode=${update.versionCode}, " +
+                    "reason=$failureReason, downloadedBytes=$downloadedBytes, " +
+                    "totalBytes=$totalBytes, keepPartial=$shouldKeepPartial, " +
+                    "exception=${exception::class.java.name}, message=${exception.message.orEmpty()}",
+                exception
+            )
             if (!shouldKeepPartial) {
                 fileStore.deletePartial(files)
             }
-            return AppUpdateDownloadResult.Failure(exception.toDownloadFailureReason())
+            return AppUpdateDownloadResult.Failure(failureReason)
         } finally {
             connection?.let { currentConnection ->
                 if (activeConnection === currentConnection) {
@@ -185,12 +244,19 @@ internal class ResumableApkDownloader(
 
     /** 页面离开时主动断开连接，调用方随后取消协程即可清理未完成分片。 */
     fun cancel() {
+        Log.d(UPDATE_LOG_TAG, "取消 APK 下载：active=${activeConnection != null}")
         activeConnection?.disconnect()
+    }
+
+    /** 提供给 Repository 记录取消前的连接状态，不暴露网络对象本身。 */
+    fun isActive(): Boolean {
+        return activeConnection != null
     }
 
     /** 用户主动暂停时标记并断开连接，异常出口据此保留分片和 ETag。 */
     fun pause() {
         activeConnection?.let { connection ->
+            Log.d(UPDATE_LOG_TAG, "暂停 APK 下载：active=true")
             pausedConnection = connection
             connection.disconnect()
         }

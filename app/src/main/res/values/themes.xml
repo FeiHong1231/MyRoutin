@@ -9,9 +9,24 @@
         <item name="colorSecondary">@color/teal_200</item>
         <item name="colorSecondaryVariant">@color/teal_700</item>
         <item name="colorOnSecondary">@color/black</item>
+        <!-- 默认 AlertDialog 统一使用应用语义色，避免按钮回退到模板紫色。 -->
+        <item name="alertDialogTheme">@style/Theme.MyRoutin.AlertDialog</item>
         <!-- Status bar color. -->
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <!-- Customize your theme here. -->
+    </style>
+
+    <!-- 默认确认、选择和编辑弹窗统一使用品牌深蓝作为浅色模式操作色。 -->
+    <style name="Theme.MyRoutin.AlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_variant</item>
+        <item name="colorSecondary">@color/plan_usage_brand_variant</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_variant</item>
+        <item name="colorAccent">@color/plan_usage_brand_variant</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_variant</item>
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
     </style>
 
     <!-- 升级弹窗单独使用品牌深蓝作为操作色，保证浅色模式下按钮文字保持清晰。 -->

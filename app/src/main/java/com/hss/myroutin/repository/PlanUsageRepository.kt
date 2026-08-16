@@ -1,5 +1,6 @@
 package com.hss.myroutin.repository
 
+import android.os.Build
 import android.util.Log
 import com.hss.myroutin.BuildConfig
 import com.hss.myroutin.logic.PlanUsageFormatter
@@ -35,14 +36,20 @@ class PlanUsageRepository(
     suspend fun queryPlanUsage(apiKey: String, requestTrace: String): PlanUsageQueryResult {
         return withContext(ioDispatcher) {
             val requestStartedAt = System.currentTimeMillis()
-            logDebug {
-                "$requestTrace 请求：GET $endpoint，" +
-                    "Authorization=Bearer ${PlanUsageFormatter.maskKey(apiKey)}，Accept=application/json"
+            logDiagnostic {
+                val maskedKey = if (BuildConfig.DEBUG) {
+                    PlanUsageFormatter.maskKey(apiKey)
+                } else {
+                    "<hidden>"
+                }
+                "$requestTrace 请求开始：method=GET，endpoint=$endpoint，" +
+                    "key=$maskedKey，Accept=application/json，" +
+                    "connectTimeoutMs=$CONNECT_TIMEOUT_MILLIS，readTimeoutMs=$READ_TIMEOUT_MILLIS"
             }
             try {
                 val result = requestUsage(apiKey, requestTrace)
-                logDebug {
-                    "$requestTrace 请求完成，耗时 ${System.currentTimeMillis() - requestStartedAt}ms，" +
+                logDiagnostic {
+                    "$requestTrace 请求完成：elapsedMs=${System.currentTimeMillis() - requestStartedAt}，" +
                         "结果=${result.debugDescription()}"
                 }
                 result
@@ -50,36 +57,29 @@ class PlanUsageRepository(
                 // 页面销毁或 ViewModel 清理时必须保留取消信号，禁止误报为一次请求失败。
                 throw exception
             } catch (exception: SocketTimeoutException) {
-                logDebug(exception) {
-                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
-                }
+                logQueryFailure(requestTrace, requestStartedAt, "NetworkTimeout", exception)
                 PlanUsageQueryResult.Failure(PlanUsageQueryError.NetworkTimeout)
             } catch (exception: IOException) {
-                logDebug(exception) {
-                    "$requestTrace 订阅额度查询失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
-                }
+                logQueryFailure(requestTrace, requestStartedAt, "NetworkUnavailable", exception)
                 PlanUsageQueryResult.Failure(PlanUsageQueryError.NetworkUnavailable)
             } catch (exception: JSONException) {
-                logDebug(exception) {
-                    "$requestTrace 服务响应解析失败，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
-                }
+                logQueryFailure(requestTrace, requestStartedAt, "InvalidResponse", exception)
                 PlanUsageQueryResult.Failure(PlanUsageQueryError.InvalidResponse)
             } catch (exception: Exception) {
-                logDebug(exception) {
-                    "$requestTrace 订阅额度查询出现未分类异常，耗时 ${System.currentTimeMillis() - requestStartedAt}ms"
-                }
+                logQueryFailure(requestTrace, requestStartedAt, "Unknown", exception)
                 PlanUsageQueryResult.Failure(PlanUsageQueryError.Unknown)
             }
         }
     }
 
     /**
-     * 发起真实接口请求；响应详情仅在 Debug 构建记录，Release 不输出服务端诊断数据。
+     * 发起真实接口请求；所有构建记录安全摘要，完整响应详情仅在 Debug 构建记录。
      * @param apiKey 用户输入并保存到本地的订阅 Key
      * @param requestTrace 当前请求的来源和批次标识
      */
     private fun requestUsage(apiKey: String, requestTrace: String): PlanUsageQueryResult {
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+        val requestUrl = URL(endpoint)
+        val connection = (requestUrl.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MILLIS
             readTimeout = READ_TIMEOUT_MILLIS
@@ -87,12 +87,27 @@ class PlanUsageRepository(
             setRequestProperty("Accept", "application/json")
         }
         try {
+            logDiagnostic {
+                "$requestTrace 连接开始：protocol=${requestUrl.protocol}，host=${requestUrl.host}，" +
+                    "port=${requestUrl.port}，proxy=${connection.usingProxy()}"
+            }
+            connection.connect()
+            logDiagnostic {
+                "$requestTrace 连接建立：proxy=${connection.usingProxy()}"
+            }
             val responseCode = connection.responseCode
+            logDiagnostic {
+                "$requestTrace 收到响应：http=$responseCode，message=${connection.responseMessage.orEmpty()}"
+            }
             val responseText = (if (responseCode in 200..299) {
                 connection.inputStream
             } else {
                 connection.errorStream
             })?.bufferedReader()?.use { it.readText() }.orEmpty()
+            logDiagnostic {
+                "$requestTrace 响应体读取完成：bodyLength=${responseText.length}"
+            }
+            logResponseSummary(requestTrace, connection, responseCode, responseText)
             logDebugResponse(requestTrace, responseCode, connection.headerFields, responseText)
             return mapHttpResponse(responseCode, responseText)
         } finally {
@@ -139,9 +154,56 @@ class PlanUsageRepository(
         if (!BuildConfig.DEBUG) {
             return
         }
-        Log.d(PLAN_USAGE_LOG_TAG, "$requestTrace 响应状态：HTTP $responseCode")
         logDebugLongMessage("$requestTrace 响应头", responseHeaders.toString())
         logDebugLongMessage("$requestTrace 响应体", responseBody)
+    }
+
+    /**
+     * 输出所有构建变体都可见的安全响应摘要，便于区分 HTTP、空响应和网络链路失败。
+     * @param requestTrace 当前请求的来源和批次标识
+     * @param connection 已收到响应的 HTTP 连接
+     * @param responseCode 服务端 HTTP 状态码
+     * @param responseBody 已读取的响应正文，仅记录长度不记录正文内容
+     */
+    private fun logResponseSummary(
+        requestTrace: String,
+        connection: HttpURLConnection,
+        responseCode: Int,
+        responseBody: String
+    ) {
+        val responseUrl = connection.url
+        logDiagnostic {
+            "$requestTrace 响应摘要：http=$responseCode，" +
+                "finalUrl=${responseUrl.protocol}://${responseUrl.host}${responseUrl.path}，" +
+                "contentType=${connection.contentType.orEmpty()}，" +
+                "contentLength=${connection.contentLengthLong}，bodyLength=${responseBody.length}"
+        }
+    }
+
+    /**
+     * 输出网络失败的映射类型和底层异常摘要；Debug 构建额外保留完整堆栈供定位 DNS/TLS 细节。
+     * @param requestTrace 当前请求的来源和批次标识
+     * @param requestStartedAt 请求开始时间，单位为毫秒
+     * @param mappedError 当前异常映射到的业务错误类型
+     * @param exception 请求抛出的底层异常
+     */
+    private fun logQueryFailure(
+        requestTrace: String,
+        requestStartedAt: Long,
+        mappedError: String,
+        exception: Throwable
+    ) {
+        val cause = exception.cause
+        Log.e(
+            PLAN_USAGE_LOG_TAG,
+            "$requestTrace 查询失败：mappedError=$mappedError，" +
+                "elapsedMs=${System.currentTimeMillis() - requestStartedAt}，" +
+                "exception=${exception::class.java.name}，message=${exception.message.orEmpty()}，" +
+                "cause=${cause?.javaClass?.name.orEmpty()}，causeMessage=${cause?.message.orEmpty()}"
+        )
+        if (BuildConfig.DEBUG) {
+            Log.e(PLAN_USAGE_LOG_TAG, "$requestTrace 查询异常堆栈", exception)
+        }
     }
 
     /**
@@ -160,27 +222,17 @@ class PlanUsageRepository(
     }
 
     /**
-     * Debug 日志使用惰性消息构造，保证 Release 连请求标识和脱敏 Key 都不会进入 Logcat。
-     * @param message Debug 构建时才计算的日志内容
+     * 输出不包含完整凭证或响应正文的基础诊断日志，正式包也保留以支持现场排查。
+     * @param message 仅包含脱敏请求标识和协议摘要的日志内容
      */
-    private inline fun logDebug(message: () -> String) {
-        if (BuildConfig.DEBUG) {
-            Log.d(PLAN_USAGE_LOG_TAG, message())
-        }
+    private inline fun logDiagnostic(message: () -> String) {
+        Log.i(
+            PLAN_USAGE_LOG_TAG,
+            "device=${Build.MANUFACTURER}/${Build.MODEL}，sdk=${Build.VERSION.SDK_INT}，${message()}"
+        )
     }
 
-    /**
-     * Debug 异常日志用于本地调试；Release 构建直接跳过，避免输出网络诊断细节。
-     * @param throwable 当前请求抛出的异常
-     * @param message Debug 构建时才计算的日志内容
-     */
-    private inline fun logDebug(throwable: Throwable, message: () -> String) {
-        if (BuildConfig.DEBUG) {
-            Log.e(PLAN_USAGE_LOG_TAG, message(), throwable)
-        }
-    }
-
-    /** 将强类型结果压缩为仅供 Debug 日志使用的描述，Release 包不会输出该内容。 */
+    /** 将强类型结果压缩为不含额度内容的安全日志描述。 */
     private fun PlanUsageQueryResult.debugDescription(): String {
         return when (this) {
             is PlanUsageQueryResult.Available -> "有效订阅"

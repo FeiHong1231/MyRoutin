@@ -103,6 +103,12 @@ class RoutinWebActivity : AppCompatActivity() {
         }
     }
 
+    /** 未登录时站点可能保留日志 URL，仅通过页面中的登录表单识别并隐藏原生加载提示。 */
+    private var recentGroupWaitingForLogin = false
+
+    /** 日志解析达到上限后停止恢复加载提示，避免页面重复完成回调造成无限等待。 */
+    private var recentGroupSyncStopped = false
+
     /** 抓取成功后暂存结果，用户选择返回设置时再通过 Activity Result 交给设置页。 */
     private var pendingRecentGroup: RoutinRecentGroup? = null
 
@@ -179,15 +185,23 @@ class RoutinWebActivity : AppCompatActivity() {
      * @param isPageLoading WebView 主页面是否仍在加载
      */
     private fun renderLoadingState(url: String?, isPageLoading: Boolean) {
+        val currentPath = url?.let(Uri::parse)?.path?.trimEnd('/')
+        val waitingForLogin = recentGroupSyncMode && (
+            recentGroupWaitingForLogin || isRoutinLoginPage(url)
+        )
         val showRecentGroupLoading = recentGroupSyncMode &&
             pendingRecentGroup == null &&
-            !isRoutinLoginPage(url)
+            !recentGroupSyncStopped &&
+            !waitingForLogin &&
+            currentPath == RECENT_GROUP_LOGS_PATH
         binding.llRecentGroupLoading.visibility = if (showRecentGroupLoading) {
             View.VISIBLE
         } else {
             View.GONE
         }
-        binding.progressRoutin.visibility = if (isPageLoading && !showRecentGroupLoading) {
+        binding.progressRoutin.visibility = if (
+            isPageLoading && !showRecentGroupLoading && !waitingForLogin
+        ) {
             View.VISIBLE
         } else {
             View.GONE
@@ -518,10 +532,13 @@ class RoutinWebActivity : AppCompatActivity() {
 
     /** 登录页只等待用户操作，登录完成后再进入日志页并轮询表格中的成功记录。 */
     private fun maybeStartRecentGroupSync(view: WebView, url: String) {
-        if (!recentGroupSyncMode || isFinishing || isDestroyed) return
+        if (!recentGroupSyncMode || recentGroupSyncStopped || isFinishing || isDestroyed) return
         val uri = Uri.parse(url)
         if (!isRoutinPage(uri)) return
         if (isRoutinLoginPage(url)) {
+            recentGroupWaitingForLogin = true
+            recentGroupLogsRedirected = false
+            renderLoadingState(url, isPageLoading = false)
             recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
             recentGroupSyncHandler.postDelayed(recentGroupSyncPoll, RECENT_GROUP_LOGIN_POLL_DELAY_MS)
             return
@@ -530,19 +547,35 @@ class RoutinWebActivity : AppCompatActivity() {
             if (!recentGroupLogsRedirected) {
                 recentGroupLogsRedirected = true
                 view.loadUrl(RECENT_GROUP_LOGS_URL)
+            } else {
+                recentGroupWaitingForLogin = true
+                renderLoadingState(url, isPageLoading = false)
+                recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+                recentGroupSyncHandler.postDelayed(
+                    recentGroupSyncPoll,
+                    RECENT_GROUP_LOGIN_POLL_DELAY_MS
+                )
             }
             return
         }
-        recentGroupSyncAttempts = 0
         recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
         recentGroupSyncHandler.postDelayed(recentGroupSyncPoll, RECENT_GROUP_SYNC_POLL_DELAY_MS)
     }
 
     /** 在网页端只读取已渲染的日志表，令牌列取分组名、详情列取独立计费倍率。 */
     private fun queryRecentGroupFromPage() {
-        if (!recentGroupSyncMode || pendingRecentGroup != null || isFinishing || isDestroyed) return
+        if (
+            !recentGroupSyncMode ||
+            recentGroupSyncStopped ||
+            pendingRecentGroup != null ||
+            isFinishing ||
+            isDestroyed
+        ) return
         val currentUrl = binding.webRoutin.url.orEmpty()
         if (isRoutinLoginPage(currentUrl)) {
+            recentGroupWaitingForLogin = true
+            recentGroupLogsRedirected = false
+            renderLoadingState(currentUrl, isPageLoading = false)
             recentGroupSyncHandler.postDelayed(
                 recentGroupSyncPoll,
                 RECENT_GROUP_LOGIN_POLL_DELAY_MS
@@ -555,24 +588,40 @@ class RoutinWebActivity : AppCompatActivity() {
                 recentGroupLogsRedirected = true
                 binding.webRoutin.loadUrl(RECENT_GROUP_LOGS_URL)
             } else {
+                recentGroupWaitingForLogin = true
+                renderLoadingState(currentUrl, isPageLoading = false)
                 recentGroupSyncHandler.postDelayed(
                     recentGroupSyncPoll,
-                    RECENT_GROUP_SYNC_POLL_DELAY_MS
+                    RECENT_GROUP_LOGIN_POLL_DELAY_MS
                 )
             }
             return
         }
         if (recentGroupSyncAttempts >= RECENT_GROUP_SYNC_MAX_ATTEMPTS) {
-            binding.llRecentGroupLoading.visibility = View.GONE
-            MyToastD.show(getString(R.string.settings_routin_account_sync_failed))
+            stopRecentGroupSync()
             return
         }
-        recentGroupSyncAttempts += 1
         binding.webRoutin.evaluateJavascript(RECENT_GROUP_QUERY_SCRIPT) { rawResult ->
             if (isFinishing || isDestroyed) return@evaluateJavascript
-            val recentGroup = parseRecentGroupResult(rawResult)
+            val pageResult = parseRecentGroupPageResult(rawResult)
+            if (pageResult?.optBoolean(RECENT_GROUP_LOGIN_REQUIRED_FIELD) == true) {
+                recentGroupWaitingForLogin = true
+                recentGroupLogsRedirected = false
+                renderLoadingState(currentUrl, isPageLoading = false)
+                recentGroupSyncHandler.postDelayed(
+                    recentGroupSyncPoll,
+                    RECENT_GROUP_LOGIN_POLL_DELAY_MS
+                )
+                return@evaluateJavascript
+            }
+            recentGroupWaitingForLogin = false
+            recentGroupSyncAttempts += 1
+            renderLoadingState(currentUrl, isPageLoading = false)
+            val recentGroup = pageResult?.let(::parseRecentGroupResult)
             if (recentGroup != null) {
                 completeRecentGroupSync(recentGroup)
+            } else if (recentGroupSyncAttempts >= RECENT_GROUP_SYNC_MAX_ATTEMPTS) {
+                stopRecentGroupSync()
             } else {
                 recentGroupSyncHandler.postDelayed(
                     recentGroupSyncPoll,
@@ -582,15 +631,19 @@ class RoutinWebActivity : AppCompatActivity() {
         }
     }
 
-    /** 将 WebView 的脚本结果解码为展示模型，异常或字段缺失时继续等待下一次渲染。 */
-    private fun parseRecentGroupResult(rawResult: String): RoutinRecentGroup? {
-        val json = runCatching {
+    /** 将 WebView 的脚本结果解码为对象，供登录态和最近分组共用同一次解析结果。 */
+    private fun parseRecentGroupPageResult(rawResult: String): JSONObject? {
+        return runCatching {
             when (val value = JSONTokener(rawResult).nextValue()) {
                 is JSONObject -> value
                 is String -> JSONObject(value)
                 else -> null
             }
-        }.getOrNull() ?: return null
+        }.getOrNull()
+    }
+
+    /** 将完整的日志脚本结果转换为展示模型，字段缺失时继续等待表格渲染。 */
+    private fun parseRecentGroupResult(json: JSONObject): RoutinRecentGroup? {
         val groupName = json.optString("groupName").trim()
         val requestTime = json.optString("requestTime").trim()
         val multiplier = json.optDouble("multiplier", Double.NaN)
@@ -599,6 +652,16 @@ class RoutinWebActivity : AppCompatActivity() {
         } else {
             null
         }
+    }
+
+    /** 达到解析上限后只提示一次并停止加载状态，页面后续回调不得重新启动轮询。 */
+    private fun stopRecentGroupSync() {
+        if (recentGroupSyncStopped) return
+        recentGroupSyncStopped = true
+        recentGroupSyncHandler.removeCallbacks(recentGroupSyncPoll)
+        binding.llRecentGroupLoading.visibility = View.GONE
+        binding.progressRoutin.visibility = View.GONE
+        MyToastD.show(getString(R.string.settings_routin_account_sync_failed))
     }
 
     /** 暂存不含凭证的同步摘要，网页登录会话留在 WebView Cookie 中并等待用户选择。 */
@@ -917,6 +980,7 @@ class RoutinWebActivity : AppCompatActivity() {
         private const val WEB_GUIDE_PREFERENCES_NAME = "routin_web_guide_preferences"
         private const val KEY_LANGUAGE_GUIDE_SHOWN = "language_guide_shown"
         private const val EXTRA_RECENT_GROUP_SYNC = "routin_recent_group_sync"
+        private const val RECENT_GROUP_LOGIN_REQUIRED_FIELD = "loginRequired"
         private const val STATE_INITIAL_PAGE_RETURN_PENDING =
             "routin_initial_page_return_pending"
         private const val STATE_CLEAR_HISTORY_AFTER_INITIAL_PAGE_RETURN =
@@ -980,6 +1044,10 @@ class RoutinWebActivity : AppCompatActivity() {
          */
         private val RECENT_GROUP_QUERY_SCRIPT = """
             (function() {
+                var passwordInput = document.querySelector('input[type="password"]');
+                if (passwordInput && passwordInput.getClientRects().length > 0) {
+                    return { loginRequired: true };
+                }
                 var rows = Array.prototype.slice.call(
                     document.querySelectorAll('table tbody tr')
                 );

@@ -9,6 +9,8 @@
         <item name="colorSecondary">@color/plan_usage_brand_primary</item>
         <item name="colorSecondaryVariant">@color/plan_usage_brand_primary</item>
         <item name="colorOnSecondary">@color/black</item>
+        <!-- 默认 AlertDialog 切换到高对比亮蓝操作色，覆盖模板深蓝按钮。 -->
+        <item name="alertDialogTheme">@style/Theme.MyRoutin.AlertDialog</item>
         <!-- 夜间弹窗、菜单、输入框和系统栏沿用同一组深色层级。 -->
         <item name="colorSurface">@color/plan_usage_surface</item>
         <item name="colorOnSurface">@color/plan_usage_text_primary</item>
@@ -23,6 +25,19 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:forceDarkAllowed">false</item>
+    </style>
+
+    <!-- 深色弹窗使用亮蓝按钮和深色表面，确保操作、单选项及正文均保持清晰。 -->
+    <style name="Theme.MyRoutin.AlertDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/plan_usage_brand_primary</item>
+        <item name="colorSecondary">@color/plan_usage_brand_primary</item>
+        <item name="colorControlActivated">@color/plan_usage_brand_primary</item>
+        <item name="colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="android:colorAccent">@color/plan_usage_brand_primary</item>
+        <item name="colorSurface">@color/plan_usage_surface</item>
+        <item name="colorOnSurface">@color/plan_usage_text_primary</item>
+        <item name="android:textColorPrimary">@color/plan_usage_text_primary</item>
+        <item name="android:textColorSecondary">@color/plan_usage_text_secondary</item>
     </style>
 
     <!-- 升级弹窗的操作色必须避开页面主色，避免深蓝文字落在深色表面后难以辨认。 -->

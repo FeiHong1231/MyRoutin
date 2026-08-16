@@ -1,5 +1,6 @@
 package com.hss.myroutin.update
 
+import android.util.Log
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -22,27 +23,58 @@ internal class AppUpdateManifestClient(
     /**
      * 请求并解析 GitHub 最新 Release 附带的 update.json；不信任非固定仓库的下载地址。
      * @param manifestUrl 固定仓库的更新清单地址
+     * @param requestId 本次检查的关联编号，用于串联请求与解析日志
      * @return 已完成字段和来源校验的更新清单
      */
-    fun request(manifestUrl: String): AppUpdateManifest {
-        val connection = connectionFactory.open(manifestUrl)
-        activeConnection = connection
+    fun request(
+        manifestUrl: String,
+        requestId: Long = System.currentTimeMillis()
+    ): AppUpdateManifest {
+        var connection: HttpURLConnection? = null
+        var responseCode: Int? = null
         try {
-            if (connection.responseCode !in HTTP_SUCCESS_RANGE) {
-                throw UpdateHttpException(connection.responseCode)
+            Log.d(UPDATE_LOG_TAG, "[$requestId] 清单请求开始：url=$manifestUrl")
+            connection = connectionFactory.open(manifestUrl)
+            activeConnection = connection
+            responseCode = connection.responseCode
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] 清单响应：http=$responseCode, finalUrl=${connection.url}, " +
+                    "contentLength=${connection.contentLengthLong}, " +
+                    "contentType=${connection.contentType.orEmpty()}"
+            )
+            if (responseCode !in HTTP_SUCCESS_RANGE) {
+                throw UpdateHttpException(responseCode)
             }
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            return parse(body)
+            Log.d(UPDATE_LOG_TAG, "[$requestId] 清单读取完成：bodyLength=${body.length}")
+            val update = parse(body)
+            Log.d(
+                UPDATE_LOG_TAG,
+                "[$requestId] 清单解析成功：versionCode=${update.versionCode}, " +
+                    "versionName=${update.versionName}, apkSizeBytes=${update.apkSizeBytes}, " +
+                    "sha256Present=${update.sha256.isNotBlank()}"
+            )
+            return update
+        } catch (exception: Exception) {
+            Log.e(
+                UPDATE_LOG_TAG,
+                "[$requestId] 清单请求失败：http=$responseCode, " +
+                    "exception=${exception::class.java.name}, message=${exception.message.orEmpty()}",
+                exception
+            )
+            throw exception
         } finally {
             if (activeConnection === connection) {
                 activeConnection = null
             }
-            connection.disconnect()
+            connection?.disconnect()
         }
     }
 
     /** 用户关闭手动检查提示或再次发起检查时，立即中断尚未完成的清单请求。 */
     fun cancel() {
+        Log.d(UPDATE_LOG_TAG, "取消清单请求：active=${activeConnection != null}")
         activeConnection?.disconnect()
     }
 

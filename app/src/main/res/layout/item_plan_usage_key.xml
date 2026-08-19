@@ -135,14 +135,14 @@
         tools:text="订阅已过期，当前展示最后有效数据"
         tools:visibility="visible" />
 
-    <TextView
-        android:id="@+id/tvCollapsedHint"
+    <ProgressBar
+        android:id="@+id/pbCollapsedWeekQuotaProgress"
+        style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="8dp"
         android:layout_marginTop="10dp"
-        android:text="@string/plan_usage_collapsed_hint"
-        android:textColor="@color/plan_usage_text_secondary"
-        android:textSize="13sp"
+        android:indeterminate="false"
+        android:max="1000"
         android:visibility="gone" />
 
     <LinearLayout
@@ -376,6 +376,58 @@
                 android:layout_marginTop="6dp"
                 android:indeterminate="false"
                 android:max="1000" />
+
+            <LinearLayout
+                android:id="@+id/llWeekQuotaSpeed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvWeekQuotaSpeedLabel"
+                    android:layout_width="92dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/plan_usage_label_week_speed"
+                    android:textColor="@color/plan_usage_text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/tvWeekQuotaSpeed"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/llWeekQuotaEstimate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvWeekQuotaEstimateLabel"
+                    android:layout_width="92dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/plan_usage_label_week_exhaustion"
+                    android:textColor="@color/plan_usage_text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/tvWeekQuotaEstimate"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/plan_usage_text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout

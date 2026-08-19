@@ -55,14 +55,40 @@ internal class PlanUsageKeyCardBinder(
         )
         bindStatusMessage(tvStatusMessage, planKey, latestError)
         llKeyDetails.visibility = if (planKey.isExpanded) View.VISIBLE else View.GONE
-        tvCollapsedHint.visibility = if (planKey.isExpanded) View.GONE else View.VISIBLE
+        pbCollapsedWeekQuotaProgress.visibility = View.GONE
         llKeyHeader.setOnClickListener { onTogglePlanKey(planKey.id) }
         tvToggle.setOnClickListener { onTogglePlanKey(planKey.id) }
         tvManage.setOnClickListener { onManagePlanKey(tvManage, planKey) }
         btnCopyKey.setOnClickListener { onCopyPlanKey(planKey) }
         if (planKey.isExpanded) {
             bindPlanKeyDetails(cardBinding, planKey)
+        } else {
+            bindCollapsedWeekQuotaProgress(cardBinding, planKey)
         }
+    }
+
+    /**
+     * 收起态只展示周额度已用比例，缺少有效周额度时保持该区域隐藏。
+     * @param cardBinding 收起卡片的固定 XML 节点
+     * @param planKey 当前 Key 及其本地缓存
+     */
+    private fun bindCollapsedWeekQuotaProgress(
+        cardBinding: ItemPlanUsageKeyBinding,
+        planKey: SavedPlanKey
+    ) {
+        val usage = planKey.cachedUsage ?: return
+        val quotaResult = PlanUsageQuotaCalculator.calculateCycleQuota(
+            usedUsd = usage.weeklyUsedUsd,
+            limitUsd = usage.weeklyLimitUsd,
+            remainingUsd = usage.weeklyRemainingUsd
+        )
+        val usedRate = quotaResult.usedRate ?: return
+        updateProgressBar(
+            cardBinding.pbCollapsedWeekQuotaProgress,
+            usedRate,
+            quotaResult.isWarning
+        )
+        cardBinding.pbCollapsedWeekQuotaProgress.visibility = View.VISIBLE
     }
 
     /**
@@ -206,6 +232,7 @@ internal class PlanUsageKeyCardBinder(
                 remainingUsd = usage.weeklyRemainingUsd
             )
             cardBinding.llWeekQuota.visibility = View.VISIBLE
+            bindWeeklyExhaustion(cardBinding, planKey, usage)
             bindDetailRow(
                 cardBinding.llCycleWindowEndFirst,
                 cardBinding.tvCycleWindowEndLabelFirst,
@@ -232,14 +259,6 @@ internal class PlanUsageKeyCardBinder(
         if (!usage.hasResourceUsage() && !usage.hasCycleUsage()) {
             cardBinding.tvNoQuotaHint.visibility = View.VISIBLE
         }
-        bindDetailRow(
-            cardBinding.llAllowedModelsRow,
-            cardBinding.tvAllowedModelsLabel,
-            cardBinding.tvAllowedModelsValue,
-            context.getString(R.string.plan_usage_label_allowed_models),
-            usage.allowedModels.takeIf { it.isNotEmpty() }?.joinToString()
-                ?: context.getString(R.string.plan_usage_value_unavailable)
-        )
         bindDetailRow(
             cardBinding.llGroupMultipliersRow,
             cardBinding.tvGroupMultipliersLabel,
@@ -321,6 +340,8 @@ internal class PlanUsageKeyCardBinder(
         tvCycleTitle.visibility = View.GONE
         llDayQuota.visibility = View.GONE
         llWeekQuota.visibility = View.GONE
+        llWeekQuotaSpeed.visibility = View.GONE
+        llWeekQuotaEstimate.visibility = View.GONE
         llCycleWindowEndFirst.visibility = View.GONE
         llCycleWindowEndSecond.visibility = View.GONE
         tvResourceTitle.visibility = View.GONE
@@ -496,6 +517,104 @@ internal class PlanUsageKeyCardBinder(
             quotaResult = quotaResult,
             progressBar = progressBar
         )
+    }
+
+    /** 将周额度的速度和预计耗尽状态写入周进度条下方的固定文本节点。 */
+    private fun bindWeeklyExhaustion(
+        cardBinding: ItemPlanUsageKeyBinding,
+        planKey: SavedPlanKey,
+        usage: PlanUsageSnapshot
+    ) {
+        val context = cardBinding.root.context
+        val speedRow = cardBinding.llWeekQuotaSpeed
+        val estimateRow = cardBinding.llWeekQuotaEstimate
+        val speedView = cardBinding.tvWeekQuotaSpeed
+        val estimateView = cardBinding.tvWeekQuotaEstimate
+        speedRow.visibility = View.GONE
+        estimateRow.visibility = View.GONE
+
+        when (val result = PlanUsageQuotaCalculator.estimateWeeklyExhaustion(
+            usage = usage,
+            sampleAtMillis = planKey.lastUpdatedAt
+        )) {
+            PlanUsageQuotaCalculator.WeeklyExhaustionResult.Exhausted -> {
+                estimateView.text = context.getString(R.string.plan_usage_week_exhausted)
+                estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+                estimateRow.visibility = View.VISIBLE
+            }
+            is PlanUsageQuotaCalculator.WeeklyExhaustionResult.Insufficient -> {
+                estimateView.text = context.getString(
+                    when (result.reason) {
+                        PlanUsageQuotaCalculator.InsufficientReason.NO_USAGE ->
+                            R.string.plan_usage_week_no_usage
+                        PlanUsageQuotaCalculator.InsufficientReason.LOW_USAGE ->
+                            R.string.plan_usage_week_low_usage
+                        PlanUsageQuotaCalculator.InsufficientReason.INVALID_DATA ->
+                            R.string.plan_usage_week_unavailable
+                    }
+                )
+                estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+                estimateRow.visibility = View.VISIBLE
+            }
+            is PlanUsageQuotaCalculator.WeeklyExhaustionResult.WillExhaust -> {
+                bindWeeklySpeed(speedRow, speedView, context, result.effectiveSpeedUsdPerHour)
+                estimateView.text = context.getString(
+                    R.string.plan_usage_week_exhaustion,
+                    formatEstimateDuration(context, result.hoursUntilExhaustion)
+                )
+                estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+                estimateRow.visibility = View.VISIBLE
+            }
+            is PlanUsageQuotaCalculator.WeeklyExhaustionResult.WillSurviveReset -> {
+                bindWeeklySpeed(speedRow, speedView, context, result.effectiveSpeedUsdPerHour)
+                estimateView.text = context.getString(R.string.plan_usage_week_survive_reset)
+                estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+                estimateRow.visibility = View.VISIBLE
+            }
+            is PlanUsageQuotaCalculator.WeeklyExhaustionResult.NearReset -> {
+                bindWeeklySpeed(speedRow, speedView, context, result.effectiveSpeedUsdPerHour)
+                estimateView.text = if (result.hoursUntilReset > 0.0) {
+                    context.getString(
+                        R.string.plan_usage_week_near_reset,
+                        formatEstimateDuration(context, result.hoursUntilReset)
+                    )
+                } else {
+                    context.getString(R.string.plan_usage_week_reset_due)
+                }
+                estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+                estimateRow.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    /** 将每小时速度转换为每天速度，并写入与窗口结束行一致的左右信息行。 */
+    private fun bindWeeklySpeed(
+        speedRow: View,
+        speedView: TextView,
+        context: Context,
+        speedUsdPerHour: Double
+    ) {
+        speedView.text = context.getString(
+            R.string.plan_usage_week_speed,
+            PlanUsageFormatter.formatUsd(speedUsdPerHour * HOURS_PER_DAY)
+        )
+        speedView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
+        speedRow.visibility = View.VISIBLE
+    }
+
+    /** 将小时转换为适合额度卡片的天/小时文案，避免显示过长的小数。 */
+    private fun formatEstimateDuration(context: Context, hours: Double): String {
+        return if (hours < HOURS_PER_DAY) {
+            context.getString(
+                R.string.plan_usage_duration_hours,
+                PlanUsageFormatter.formatDecimal(hours)
+            )
+        } else {
+            context.getString(
+                R.string.plan_usage_duration_days,
+                PlanUsageFormatter.formatDecimal(hours / HOURS_PER_DAY)
+            )
+        }
     }
 
     /**
@@ -688,6 +807,8 @@ internal class PlanUsageKeyCardBinder(
     private companion object {
         /** ProgressBar 以 0.1% 为最小单位，避免 0.9% 等小用量被截断为零。 */
         private const val PROGRESS_MAX = 1_000
+        /** 速度统一以每小时计算，页面展示转换为每天便于用户理解。 */
+        private const val HOURS_PER_DAY = 24.0
         /** 额度绘制诊断统一使用该 Tag，便于在 Logcat 中单独过滤。 */
         private const val PLAN_USAGE_PROGRESS_LOG_TAG = "PlanUsageProgress"
     }

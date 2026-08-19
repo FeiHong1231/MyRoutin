@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.hss.myroutin.R
 import com.hss.myroutin.databinding.ActivityMainNavigationBinding
+import com.hss.myroutin.databinding.DialogModelPriceBinding
 import com.hss.myroutin.fragment.ModelRadarFragment
 import com.hss.myroutin.fragment.PlanUsageFragment
 import com.hss.myroutin.fragment.SettingsFragment
@@ -69,6 +70,8 @@ class PlanUsageInputActivity : AppCompatActivity() {
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         menu.findItem(R.id.action_daily_check_in)?.isVisible =
             selectedNavigationItemId == R.id.navigation_usage
+        menu.findItem(R.id.action_model_price)?.isVisible =
+            selectedNavigationItemId == R.id.navigation_models
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -83,8 +86,34 @@ class PlanUsageInputActivity : AppCompatActivity() {
                 true
             }
 
+            R.id.action_model_price -> {
+                showModelPriceDialog()
+                true
+            }
+
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    /**
+     * 展示模型数据页使用的 Token 价格排行，价格倍数统一以最低价 luna 为基准。
+     * 弹窗由主容器承载，保证从右上角菜单打开时不依赖模型页的临时 View 状态。
+     */
+    private fun showModelPriceDialog() {
+        val dialogBinding = DialogModelPriceBinding.inflate(layoutInflater)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogBinding.root)
+            .create()
+        dialogBinding.btnClose.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+
+        // 表格需要稳定的横向空间，手机按屏宽适配，平板限制最大宽度避免内容过度拉伸。
+        val maxDialogWidth = (resources.displayMetrics.density * 560).toInt()
+        val preferredDialogWidth = (resources.displayMetrics.widthPixels * 0.92f).toInt()
+        dialog.window?.setLayout(
+            minOf(maxDialogWidth, preferredDialogWidth),
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT
+        )
     }
 
     /**

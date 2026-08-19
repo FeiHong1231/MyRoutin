@@ -20,6 +20,7 @@
     <string name="settings_routin_account_sync_failed">获取分组信息失败，请稍后重试</string>
     <string name="settings_current_version">当前版本 v%1$s</string>
     <string name="menu_check_update">检查更新</string>
+    <string name="menu_model_price">模型价格</string>
     <string name="menu_appearance">外观</string>
     <string name="menu_daily_check_in">每日签到</string>
     <string name="appearance_follow_system">跟随系统</string>
@@ -67,7 +68,6 @@
     <string name="plan_usage_api_key_hint">请输入 plan- 开头的 apikey</string>
     <string name="plan_usage_empty_hint">添加 Key 后可集中查看各订阅的额度和到期时间</string>
     <string name="plan_usage_card_refreshing">正在刷新...</string>
-    <string name="plan_usage_collapsed_hint">已收起，点击卡片标题展开详情</string>
     <string name="plan_usage_cycle_title">周期订阅</string>
     <string name="plan_usage_resource_title">资源包套餐</string>
     <string name="plan_usage_no_quota_hint">暂无可展示额度</string>
@@ -143,6 +143,27 @@
     <string name="model_radar_summary_tasks">通过 %1$d/%2$d 题</string>
     <string name="model_radar_summary_unavailable">暂无社区评分和题目统计</string>
     <string name="model_radar_no_intelligence_data">暂无雷达智力数据</string>
+
+    <string name="model_price_dialog_title">每 1M Token 价格排行（便宜 → 贵）</string>
+    <string name="model_price_header_rank">排名</string>
+    <string name="model_price_header_model">模型</string>
+    <string name="model_price_header_price">价格</string>
+    <string name="model_price_header_relative">相对 luna</string>
+    <string name="model_price_model_luna">5.6-luna</string>
+    <string name="model_price_model_terra">5.6-terra</string>
+    <string name="model_price_model_54">5.4</string>
+    <string name="model_price_model_sol">5.6-sol</string>
+    <string name="model_price_model_55">5.5</string>
+    <string name="model_price_price_luna">$0.2</string>
+    <string name="model_price_price_terra">$2</string>
+    <string name="model_price_price_54">$2.5</string>
+    <string name="model_price_price_sol">$5</string>
+    <string name="model_price_price_55">$5</string>
+    <string name="model_price_multiple_luna">1倍</string>
+    <string name="model_price_multiple_terra">10倍</string>
+    <string name="model_price_multiple_54">12.5倍</string>
+    <string name="model_price_multiple_sol">25倍</string>
+    <string name="model_price_multiple_55">25倍</string>
     <string name="model_radar_refresh_failed_with_cache">刷新失败，继续显示上次数据</string>
     <string name="model_radar_error_http">CodexRadar 请求失败（HTTP %1$d）</string>
     <string name="model_radar_error_timeout">连接 CodexRadar 超时，请稍后重试</string>
@@ -190,6 +211,19 @@
     <string name="plan_usage_not_queried">未查询</string>
     <string name="plan_usage_quota_detail">已用 %1$s / %2$s，剩余 %3$s</string>
     <string name="plan_usage_used_percent">已用%1$s</string>
+    <string name="plan_usage_label_week_speed">使用速度</string>
+    <string name="plan_usage_label_week_exhaustion">预计耗尽</string>
+    <string name="plan_usage_week_speed">约%1$s/天</string>
+    <string name="plan_usage_week_exhaustion">约%1$s后用完</string>
+    <string name="plan_usage_week_survive_reset">本周重置前用不完</string>
+    <string name="plan_usage_week_near_reset">距重置约%1$s</string>
+    <string name="plan_usage_week_reset_due">即将重置，请刷新</string>
+    <string name="plan_usage_week_exhausted">已用完</string>
+    <string name="plan_usage_week_no_usage">尚未产生可计算用量</string>
+    <string name="plan_usage_week_low_usage">当前用量较少，暂无法稳定估算</string>
+    <string name="plan_usage_week_unavailable">暂无法计算</string>
+    <string name="plan_usage_duration_hours">%1$s小时</string>
+    <string name="plan_usage_duration_days">%1$s天</string>
     <string name="plan_usage_multiplier">x%1$s</string>
     <string name="plan_usage_list_separator">，</string>
 

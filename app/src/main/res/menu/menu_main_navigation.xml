@@ -8,4 +8,10 @@
         android:icon="@drawable/ic_daily_check_in"
         android:title="@string/menu_daily_check_in"
         app:showAsAction="always" />
+
+    <!-- 仅在“模型数据”页显示，价格说明与模型列表保持同一层级。 -->
+    <item
+        android:id="@+id/action_model_price"
+        android:title="@string/menu_model_price"
+        app:showAsAction="always" />
 </menu>

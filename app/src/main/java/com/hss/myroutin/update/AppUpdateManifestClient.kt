@@ -93,7 +93,7 @@ internal class AppUpdateManifestClient(
         if (
             versionCode <= 0 ||
             versionName.isBlank() ||
-            !apkUrl.startsWith(TRUSTED_APK_URL_PREFIX) ||
+            TRUSTED_APK_URL_PREFIXES.none(apkUrl::startsWith) ||
             !SHA_256_PATTERN.matches(sha256)
         ) {
             throw UpdateManifestException()
@@ -108,8 +108,11 @@ internal class AppUpdateManifestClient(
     }
 
     private companion object {
-        private const val TRUSTED_APK_URL_PREFIX =
-            "https://github.com/huangssh/MyRoutin/releases/download/"
+        /** 仓库迁移期间同时信任新旧 Release 地址，避免旧清单或新清单无法继续升级。 */
+        private val TRUSTED_APK_URL_PREFIXES = setOf(
+            "https://github.com/huangssh/MyRoutin/releases/download/",
+            "https://github.com/FeiHong1231/MyRoutin/releases/download/"
+        )
         private const val INVALID_VERSION_CODE = -1
         private const val INVALID_APK_SIZE = -1L
         private val HTTP_SUCCESS_RANGE = 200..299

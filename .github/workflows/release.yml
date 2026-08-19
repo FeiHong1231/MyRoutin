@@ -68,7 +68,8 @@ jobs:
           test -f "$apk_path"
           sha256="$(sha256sum "$apk_path" | awk '{print $1}')"
           apk_size_bytes="$(wc -c < "$apk_path" | tr -d '[:space:]')"
-          apk_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/MyRoutin-${version_name}.apk"
+          # 保留旧仓库前缀；GitHub 会将其重定向到迁移后的仓库，旧版本客户端才能通过地址白名单校验。
+          apk_url="https://github.com/huangssh/MyRoutin/releases/download/${TAG_NAME}/MyRoutin-${version_name}.apk"
           printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "apkUrl": "%s",\n  "sha256": "%s",\n  "apkSizeBytes": %s\n}\n' \
             "$version_code" "$version_name" "$apk_url" "$sha256" "$apk_size_bytes" > update.json
           release_notes_file="release-notes/v${version_name}.md"

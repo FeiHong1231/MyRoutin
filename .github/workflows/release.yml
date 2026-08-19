@@ -71,6 +71,13 @@ jobs:
           apk_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/MyRoutin-${version_name}.apk"
           printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "apkUrl": "%s",\n  "sha256": "%s",\n  "apkSizeBytes": %s\n}\n' \
             "$version_code" "$version_name" "$apk_url" "$sha256" "$apk_size_bytes" > update.json
-          gh release create "$TAG_NAME" "$apk_path" "update.json#update.json" \
-            --title "MyRoutin ${version_name}" \
-            --generate-notes
+          release_notes_file="release-notes/v${version_name}.md"
+          if [ -f "$release_notes_file" ]; then
+            gh release create "$TAG_NAME" "$apk_path" "update.json#update.json" \
+              --title "MyRoutin ${version_name}" \
+              --notes-file "$release_notes_file"
+          else
+            gh release create "$TAG_NAME" "$apk_path" "update.json#update.json" \
+              --title "MyRoutin ${version_name}" \
+              --generate-notes
+          fi

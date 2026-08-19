@@ -47,6 +47,51 @@ internal object PlanUsageFormatter {
     }
 
     /**
+     * 将套餐到期时间转换为适合卡片告警的剩余时长；不足一天显示小时，不足一小时显示分钟。
+     * @param serverTime 服务端返回的套餐到期时间
+     * @param nowMillis 当前时间，默认使用设备当前时间，测试时可传入固定值
+     * @return 可展示的剩余时长；时间缺失或无法解析时返回 null
+     */
+    fun resolveExpiryCountdown(
+        serverTime: String?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ExpiryCountdown? {
+        val endTimeMillis = parseServerTimeMillis(serverTime) ?: return null
+        val remainingMillis = endTimeMillis - nowMillis
+        if (remainingMillis <= 0L) {
+            return ExpiryCountdown.Expired
+        }
+        return when {
+            remainingMillis >= MILLIS_PER_DAY -> ExpiryCountdown.Remaining(
+                amount = remainingMillis / MILLIS_PER_DAY,
+                unit = ExpiryUnit.DAY
+            )
+            remainingMillis >= MILLIS_PER_HOUR -> ExpiryCountdown.Remaining(
+                amount = remainingMillis / MILLIS_PER_HOUR,
+                unit = ExpiryUnit.HOUR
+            )
+            else -> ExpiryCountdown.Remaining(
+                amount = (remainingMillis / MILLIS_PER_MINUTE).coerceAtLeast(1L),
+                unit = ExpiryUnit.MINUTE
+            )
+        }
+    }
+
+    /**
+     * 判断套餐是否进入八天内的到期提醒窗口；已到期或时间缺失均不属于未来提醒。
+     * @param serverTime 服务端返回的套餐到期时间
+     * @param nowMillis 当前时间，默认使用设备当前时间，测试时可传入固定值
+     */
+    fun isExpiryWithinWarningWindow(
+        serverTime: String?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Boolean {
+        val endTimeMillis = parseServerTimeMillis(serverTime) ?: return false
+        val remainingMillis = endTimeMillis - nowMillis
+        return remainingMillis > 0L && remainingMillis <= EXPIRY_WARNING_WINDOW_MILLIS
+    }
+
+    /**
      * 根据周窗口结束时间解析北京时间对应的星期，用于说明周期额度的固定重置日。
      * @param serverTime 服务端返回的周窗口结束时间
      * @return 中文星期简称；时间缺失或解析失败时返回 null
@@ -161,6 +206,25 @@ internal object PlanUsageFormatter {
         return if (includeZoneLabel) "$formattedDate 北京时间" else formattedDate
     }
 
+    /** 到期倒计时的单位，供展示层选择对应的本地化文案。 */
+    enum class ExpiryUnit {
+        DAY,
+        HOUR,
+        MINUTE
+    }
+
+    /** 套餐到期倒计时结果，区分已到期和仍有剩余时间。 */
+    sealed interface ExpiryCountdown {
+        /** 服务端到期时间已早于当前时间。 */
+        object Expired : ExpiryCountdown
+
+        /** 套餐仍有效，amount 使用 unit 对应的整数单位。 */
+        data class Remaining(
+            val amount: Long,
+            val unit: ExpiryUnit
+        ) : ExpiryCountdown
+    }
+
     private const val MASK_KEY_SHORT_LENGTH = 15
     private const val EMPTY_VALUE_PLACEHOLDER = "--"
     private const val DECIMAL_PATTERN = "0.##"
@@ -170,6 +234,9 @@ internal object PlanUsageFormatter {
     private const val TOKENS_PER_MILLION = 1_000_000.0
     private const val BEIJING_TIME_PATTERN = "yyyy-MM-dd HH:mm:ss"
     private const val MILLIS_PER_MINUTE = 60_000L
+    private const val MILLIS_PER_HOUR = 60L * MILLIS_PER_MINUTE
+    private const val MILLIS_PER_DAY = 24L * MILLIS_PER_HOUR
+    private const val EXPIRY_WARNING_WINDOW_MILLIS = 8L * MILLIS_PER_DAY
     private const val MINUTES_PER_HOUR = 60L
     private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
     private const val MINUTES_PER_WEEK = 7L * MINUTES_PER_DAY

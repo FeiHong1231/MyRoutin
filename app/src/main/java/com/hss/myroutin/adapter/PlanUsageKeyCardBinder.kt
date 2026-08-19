@@ -140,23 +140,16 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.tvDetailLabelFirst,
             cardBinding.tvDetailValueFirst,
             context.getString(R.string.plan_usage_label_plan),
-            usage.planName ?: context.getString(R.string.plan_usage_value_unavailable)
+            formatPlanNameWithExpiry(
+                context = context,
+                planName = usage.planName ?: context.getString(R.string.plan_usage_value_unavailable),
+                endAt = usage.endAt
+            )
         )
         bindDetailRow(
             cardBinding.llDetailRowSecond,
             cardBinding.tvDetailLabelSecond,
             cardBinding.tvDetailValueSecond,
-            context.getString(R.string.plan_usage_label_type_status),
-            context.getString(
-                R.string.plan_usage_type_status,
-                usage.type?.toString() ?: context.getString(R.string.plan_usage_value_unavailable),
-                usage.status?.toString() ?: context.getString(R.string.plan_usage_value_unavailable)
-            )
-        )
-        bindDetailRow(
-            cardBinding.llDetailRowThird,
-            cardBinding.tvDetailLabelThird,
-            cardBinding.tvDetailValueThird,
             context.getString(R.string.plan_usage_label_start_at),
             PlanUsageFormatter.formatBeijingTime(
                 usage.startAt,
@@ -164,15 +157,16 @@ internal class PlanUsageKeyCardBinder(
             )
         )
         bindDetailRow(
-            cardBinding.llDetailRowFourth,
-            cardBinding.tvDetailLabelFourth,
-            cardBinding.tvDetailValueFourth,
+            cardBinding.llDetailRowThird,
+            cardBinding.tvDetailLabelThird,
+            cardBinding.tvDetailValueThird,
             context.getString(R.string.plan_usage_label_end_at),
             PlanUsageFormatter.formatBeijingTime(
                 usage.endAt,
                 includeZoneLabel = false
             )
         )
+        cardBinding.llDetailRowFourth.visibility = View.GONE
 
         if (usage.hasCycleUsage()) {
             val dayWindowLabel = PlanUsageFormatter.resolveWindowLabel(
@@ -320,6 +314,10 @@ internal class PlanUsageKeyCardBinder(
     private fun resetPlanKeyDetailVisibility(cardBinding: ItemPlanUsageKeyBinding) = with(cardBinding) {
         tvEmptyUsageHint.visibility = View.GONE
         llPrimaryDetails.visibility = View.GONE
+        llDetailRowFirst.visibility = View.GONE
+        llDetailRowSecond.visibility = View.GONE
+        llDetailRowThird.visibility = View.GONE
+        llDetailRowFourth.visibility = View.GONE
         tvCycleTitle.visibility = View.GONE
         llDayQuota.visibility = View.GONE
         llWeekQuota.visibility = View.GONE
@@ -331,6 +329,46 @@ internal class PlanUsageKeyCardBinder(
         llAllowedModelsRow.visibility = View.GONE
         llGroupMultipliersRow.visibility = View.GONE
         llLastUpdatedRow.visibility = View.GONE
+    }
+
+    /** 仅在未来八天内合并红色到期倒计时，缺少时间或距离过远时保留原套餐名称。 */
+    private fun formatPlanNameWithExpiry(
+        context: Context,
+        planName: String,
+        endAt: String?
+    ): CharSequence {
+        val nowMillis = System.currentTimeMillis()
+        val countdown = PlanUsageFormatter.resolveExpiryCountdown(endAt, nowMillis)
+        val expiryText = when (countdown) {
+            null -> return planName
+            PlanUsageFormatter.ExpiryCountdown.Expired ->
+                context.getString(R.string.plan_usage_plan_expired)
+            is PlanUsageFormatter.ExpiryCountdown.Remaining -> {
+                if (!PlanUsageFormatter.isExpiryWithinWarningWindow(endAt, nowMillis)) {
+                    return planName
+                }
+                context.getString(
+                    when (countdown.unit) {
+                        PlanUsageFormatter.ExpiryUnit.DAY -> R.string.plan_usage_plan_expiry_days
+                        PlanUsageFormatter.ExpiryUnit.HOUR -> R.string.plan_usage_plan_expiry_hours
+                        PlanUsageFormatter.ExpiryUnit.MINUTE -> R.string.plan_usage_plan_expiry_minutes
+                    },
+                    countdown.amount
+                )
+            }
+        }
+        val fullText = context.getString(R.string.plan_usage_plan_with_expiry, planName, expiryText)
+        return SpannableString(fullText).apply {
+            val warningStart = fullText.lastIndexOf(expiryText)
+            if (warningStart >= 0) {
+                setSpan(
+                    ForegroundColorSpan(context.getColor(R.color.plan_usage_danger)),
+                    warningStart - 1,
+                    fullText.length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+        }
     }
 
     /**

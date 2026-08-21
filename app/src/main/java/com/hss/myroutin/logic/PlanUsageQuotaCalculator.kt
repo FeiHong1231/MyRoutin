@@ -11,7 +11,7 @@ import com.hss.myroutin.model.PlanUsageSnapshot
 internal object PlanUsageQuotaCalculator {
 
     /**
-     * 根据周窗口累计用量和短窗口用量估算周额度的耗尽时间，结果不跨越服务端重置边界。
+     * 根据周窗口累计用量和短窗口用量估算周额度的数学耗尽时间；服务端重置时间仅用于校验窗口和内部分类。
      * @param usage 当前 Key 的完整额度快照
      * @param sampleAtMillis 快照实际成功获取的时间，不能使用卡片绑定时间代替
      * @param nowMillis 当前时间，测试时传入固定值
@@ -106,6 +106,7 @@ internal object PlanUsageQuotaCalculator {
         }
 
         val hoursUntilReset = (weekEndMillis - nowMillis).toDouble() / MILLIS_PER_HOUR
+        val hoursUntilExhaustion = weekQuota.remainingUsd / effectiveSpeed
         val confidence = resolveConfidence(
             weekElapsedHours = weekElapsedHours,
             shortWindowIsUsable = shortWindowIsUsable,
@@ -114,12 +115,12 @@ internal object PlanUsageQuotaCalculator {
         if (hoursUntilReset <= NEAR_RESET_HOURS) {
             return WeeklyExhaustionResult.NearReset(
                 effectiveSpeedUsdPerHour = effectiveSpeed,
+                hoursUntilExhaustion = hoursUntilExhaustion,
                 hoursUntilReset = hoursUntilReset,
                 confidence = confidence
             )
         }
 
-        val hoursUntilExhaustion = weekQuota.remainingUsd / effectiveSpeed
         return if (hoursUntilExhaustion <= hoursUntilReset) {
             WeeklyExhaustionResult.WillExhaust(
                 effectiveSpeedUsdPerHour = effectiveSpeed,
@@ -130,6 +131,7 @@ internal object PlanUsageQuotaCalculator {
         } else {
             WeeklyExhaustionResult.WillSurviveReset(
                 effectiveSpeedUsdPerHour = effectiveSpeed,
+                hoursUntilExhaustion = hoursUntilExhaustion,
                 hoursUntilReset = hoursUntilReset,
                 confidence = confidence
             )
@@ -360,16 +362,18 @@ internal object PlanUsageQuotaCalculator {
             val confidence: EstimateConfidence
         ) : WeeklyExhaustionResult
 
-        /** 当前速度下，周额度会先重置。 */
+        /** 数学耗尽时间晚于周重置，页面仍展示数学耗尽时间。 */
         data class WillSurviveReset(
             val effectiveSpeedUsdPerHour: Double,
+            val hoursUntilExhaustion: Double,
             val hoursUntilReset: Double,
             val confidence: EstimateConfidence
         ) : WeeklyExhaustionResult
 
-        /** 距离重置过近，避免展示没有实际价值的耗尽预测。 */
+        /** 距离重置过近，页面仍保留数学耗尽时间，不展示重置替代文案。 */
         data class NearReset(
             val effectiveSpeedUsdPerHour: Double,
+            val hoursUntilExhaustion: Double,
             val hoursUntilReset: Double,
             val confidence: EstimateConfidence
         ) : WeeklyExhaustionResult

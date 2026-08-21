@@ -609,20 +609,19 @@ internal class PlanUsageKeyCardBinder(
             }
             is PlanUsageQuotaCalculator.WeeklyExhaustionResult.WillSurviveReset -> {
                 bindWeeklySpeed(speedRow, speedView, context, result.effectiveSpeedUsdPerHour)
-                estimateView.text = context.getString(R.string.plan_usage_week_survive_reset)
+                estimateView.text = context.getString(
+                    R.string.plan_usage_week_exhaustion,
+                    formatEstimateDuration(context, result.hoursUntilExhaustion)
+                )
                 estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
                 estimateRow.visibility = View.VISIBLE
             }
             is PlanUsageQuotaCalculator.WeeklyExhaustionResult.NearReset -> {
                 bindWeeklySpeed(speedRow, speedView, context, result.effectiveSpeedUsdPerHour)
-                estimateView.text = if (result.hoursUntilReset > 0.0) {
-                    context.getString(
-                        R.string.plan_usage_week_near_reset,
-                        formatEstimateDuration(context, result.hoursUntilReset)
-                    )
-                } else {
-                    context.getString(R.string.plan_usage_week_reset_due)
-                }
+                estimateView.text = context.getString(
+                    R.string.plan_usage_week_exhaustion,
+                    formatEstimateDuration(context, result.hoursUntilExhaustion)
+                )
                 estimateView.setTextColor(context.getColor(R.color.plan_usage_text_primary))
                 estimateRow.visibility = View.VISIBLE
             }
@@ -644,18 +643,33 @@ internal class PlanUsageKeyCardBinder(
         speedRow.visibility = View.VISIBLE
     }
 
-    /** 将小时转换为适合额度卡片的天/小时文案，避免显示过长的小数。 */
+    /** 将小时拆分为天、小时和分钟，避免预计耗尽时间只显示小数。 */
     private fun formatEstimateDuration(context: Context, hours: Double): String {
-        return if (hours < HOURS_PER_DAY) {
+        val safeHours = hours.coerceAtLeast(0.0)
+        val totalMinutes = (safeHours * MINUTES_PER_HOUR).toLong().coerceAtLeast(1L)
+        return if (safeHours > HOURS_PER_DAY) {
+            val days = totalMinutes / MINUTES_PER_DAY
+            val remainingHours = (totalMinutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR
             context.getString(
-                R.string.plan_usage_duration_hours,
-                PlanUsageFormatter.formatDecimal(hours)
+                R.string.plan_usage_duration_days_hours,
+                days,
+                remainingHours
             )
         } else {
-            context.getString(
-                R.string.plan_usage_duration_days,
-                PlanUsageFormatter.formatDecimal(hours / HOURS_PER_DAY)
-            )
+            val hoursPart = totalMinutes / MINUTES_PER_HOUR
+            val minutesPart = totalMinutes % MINUTES_PER_HOUR
+            if (hoursPart >= 1L) {
+                context.getString(
+                    R.string.plan_usage_duration_hours_minutes,
+                    hoursPart,
+                    minutesPart
+                )
+            } else {
+                context.getString(
+                    R.string.plan_usage_duration_minutes,
+                    totalMinutes
+                )
+            }
         }
     }
 
@@ -847,6 +861,9 @@ internal class PlanUsageKeyCardBinder(
     }
 
     private companion object {
+        /** 预计耗尽时间按整数分钟拆分，避免展示小数小时。 */
+        private const val MINUTES_PER_HOUR = 60L
+        private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
         /** ProgressBar 以 0.1% 为最小单位，避免 0.9% 等小用量被截断为零。 */
         private const val PROGRESS_MAX = 1_000
         /** 速度统一以每小时计算，页面展示转换为每天便于用户理解。 */

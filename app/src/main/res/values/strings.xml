@@ -218,15 +218,13 @@
     <string name="plan_usage_label_week_exhaustion">预计耗尽</string>
     <string name="plan_usage_week_speed">约%1$s/天</string>
     <string name="plan_usage_week_exhaustion">约%1$s后用完</string>
-    <string name="plan_usage_week_survive_reset">本周重置前用不完</string>
-    <string name="plan_usage_week_near_reset">距重置约%1$s</string>
-    <string name="plan_usage_week_reset_due">即将重置，请刷新</string>
     <string name="plan_usage_week_exhausted">已用完</string>
     <string name="plan_usage_week_no_usage">尚未产生可计算用量</string>
     <string name="plan_usage_week_low_usage">当前用量较少，暂无法稳定估算</string>
     <string name="plan_usage_week_unavailable">暂无法计算</string>
-    <string name="plan_usage_duration_hours">%1$s小时</string>
-    <string name="plan_usage_duration_days">%1$s天</string>
+    <string name="plan_usage_duration_days_hours">%1$d天%2$d小时</string>
+    <string name="plan_usage_duration_hours_minutes">%1$d小时%2$d分钟</string>
+    <string name="plan_usage_duration_minutes">%1$d分钟</string>
     <string name="plan_usage_multiplier">x%1$s</string>
     <string name="plan_usage_list_separator">，</string>
 

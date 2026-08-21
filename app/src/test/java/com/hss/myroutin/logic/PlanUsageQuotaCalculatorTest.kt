@@ -45,6 +45,8 @@ class PlanUsageQuotaCalculatorTest {
         )
 
         assertTrue(result is PlanUsageQuotaCalculator.WeeklyExhaustionResult.WillSurviveReset)
+        val surviveReset = result as PlanUsageQuotaCalculator.WeeklyExhaustionResult.WillSurviveReset
+        assertEquals(1_728.0, surviveReset.hoursUntilExhaustion, 0.0001)
     }
 
     @Test
@@ -67,6 +69,7 @@ class PlanUsageQuotaCalculatorTest {
             surviveReset.confidence
         )
         assertEquals(2.5, surviveReset.effectiveSpeedUsdPerHour, 0.0001)
+        assertEquals(188.0, surviveReset.hoursUntilExhaustion, 0.0001)
     }
 
     @Test
@@ -147,6 +150,8 @@ class PlanUsageQuotaCalculatorTest {
         )
 
         assertTrue(result is PlanUsageQuotaCalculator.WeeklyExhaustionResult.NearReset)
+        val nearReset = result as PlanUsageQuotaCalculator.WeeklyExhaustionResult.NearReset
+        assertTrue(nearReset.hoursUntilExhaustion > nearReset.hoursUntilReset)
     }
 
     @Test

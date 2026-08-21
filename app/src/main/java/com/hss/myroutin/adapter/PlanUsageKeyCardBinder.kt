@@ -166,10 +166,11 @@ internal class PlanUsageKeyCardBinder(
             cardBinding.tvDetailLabelFirst,
             cardBinding.tvDetailValueFirst,
             context.getString(R.string.plan_usage_label_plan),
-            formatPlanNameWithExpiry(
+            formatPlanNameWithAlert(
                 context = context,
                 planName = usage.planName ?: context.getString(R.string.plan_usage_value_unavailable),
-                endAt = usage.endAt
+                endAt = usage.endAt,
+                weekWindowEndAt = usage.weekWindowEndAt
             )
         )
         bindDetailRow(
@@ -352,35 +353,53 @@ internal class PlanUsageKeyCardBinder(
         llLastUpdatedRow.visibility = View.GONE
     }
 
-    /** 仅在未来八天内合并红色到期倒计时，缺少时间或距离过远时保留原套餐名称。 */
-    private fun formatPlanNameWithExpiry(
+    /**
+     * 将套餐到期和周额度重置告警合并到套餐名称后，套餐到期告警优先于周额度重置告警。
+     * @param context 当前卡片用于读取本地化文案和告警颜色
+     * @param planName 套餐名称
+     * @param endAt 套餐到期时间
+     * @param weekWindowEndAt 周额度窗口结束时间
+     */
+    private fun formatPlanNameWithAlert(
         context: Context,
         planName: String,
-        endAt: String?
+        endAt: String?,
+        weekWindowEndAt: String?
     ): CharSequence {
         val nowMillis = System.currentTimeMillis()
-        val countdown = PlanUsageFormatter.resolveExpiryCountdown(endAt, nowMillis)
-        val expiryText = when (countdown) {
-            null -> return planName
+        val alertText = when (val countdown = PlanUsageFormatter.resolveExpiryCountdown(endAt, nowMillis)) {
+            null -> null
             PlanUsageFormatter.ExpiryCountdown.Expired ->
                 context.getString(R.string.plan_usage_plan_expired)
             is PlanUsageFormatter.ExpiryCountdown.Remaining -> {
                 if (!PlanUsageFormatter.isExpiryWithinWarningWindow(endAt, nowMillis)) {
-                    return planName
+                    null
+                } else {
+                    formatAlertCountdown(
+                        context = context,
+                        duration = countdown.duration,
+                        daysHoursResId = R.string.plan_usage_plan_expiry_days_hours,
+                        hoursMinutesResId = R.string.plan_usage_plan_expiry_hours_minutes,
+                        minutesResId = R.string.plan_usage_plan_expiry_minutes
+                    )
                 }
-                context.getString(
-                    when (countdown.unit) {
-                        PlanUsageFormatter.ExpiryUnit.DAY -> R.string.plan_usage_plan_expiry_days
-                        PlanUsageFormatter.ExpiryUnit.HOUR -> R.string.plan_usage_plan_expiry_hours
-                        PlanUsageFormatter.ExpiryUnit.MINUTE -> R.string.plan_usage_plan_expiry_minutes
-                    },
-                    countdown.amount
-                )
             }
+        } ?: when (val countdown = PlanUsageFormatter.resolveWeekResetCountdown(weekWindowEndAt, nowMillis)) {
+            null -> null
+            is PlanUsageFormatter.ResetCountdown.Remaining -> formatAlertCountdown(
+                context = context,
+                duration = countdown.duration,
+                daysHoursResId = R.string.plan_usage_plan_reset_days_hours,
+                hoursMinutesResId = R.string.plan_usage_plan_reset_hours_minutes,
+                minutesResId = R.string.plan_usage_plan_reset_minutes
+            )
         }
-        val fullText = context.getString(R.string.plan_usage_plan_with_expiry, planName, expiryText)
+        if (alertText == null) {
+            return planName
+        }
+        val fullText = context.getString(R.string.plan_usage_plan_with_alert, planName, alertText)
         return SpannableString(fullText).apply {
-            val warningStart = fullText.lastIndexOf(expiryText)
+            val warningStart = fullText.lastIndexOf(alertText)
             if (warningStart >= 0) {
                 setSpan(
                     ForegroundColorSpan(context.getColor(R.color.plan_usage_danger)),
@@ -389,6 +408,29 @@ internal class PlanUsageKeyCardBinder(
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                 )
             }
+        }
+    }
+
+    /** 按告警时长选择组合单位文案，完整保留天/小时或小时/分钟的余量。 */
+    private fun formatAlertCountdown(
+        context: Context,
+        duration: PlanUsageFormatter.CountdownDuration,
+        daysHoursResId: Int,
+        hoursMinutesResId: Int,
+        minutesResId: Int
+    ): String {
+        return when {
+            duration.days > 0L -> context.getString(
+                daysHoursResId,
+                duration.days,
+                duration.hours
+            )
+            duration.hours > 0L -> context.getString(
+                hoursMinutesResId,
+                duration.hours,
+                duration.minutes
+            )
+            else -> context.getString(minutesResId, duration.minutes)
         }
     }
 

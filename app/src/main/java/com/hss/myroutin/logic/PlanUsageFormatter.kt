@@ -47,7 +47,7 @@ internal object PlanUsageFormatter {
     }
 
     /**
-     * 将套餐到期时间转换为适合卡片告警的剩余时长；不足一天显示小时，不足一小时显示分钟。
+     * 将套餐到期时间拆成适合卡片告警的天、小时和分钟，展示层再选择组合文案。
      * @param serverTime 服务端返回的套餐到期时间
      * @param nowMillis 当前时间，默认使用设备当前时间，测试时可传入固定值
      * @return 可展示的剩余时长；时间缺失或无法解析时返回 null
@@ -61,20 +61,7 @@ internal object PlanUsageFormatter {
         if (remainingMillis <= 0L) {
             return ExpiryCountdown.Expired
         }
-        return when {
-            remainingMillis >= MILLIS_PER_DAY -> ExpiryCountdown.Remaining(
-                amount = remainingMillis / MILLIS_PER_DAY,
-                unit = ExpiryUnit.DAY
-            )
-            remainingMillis >= MILLIS_PER_HOUR -> ExpiryCountdown.Remaining(
-                amount = remainingMillis / MILLIS_PER_HOUR,
-                unit = ExpiryUnit.HOUR
-            )
-            else -> ExpiryCountdown.Remaining(
-                amount = (remainingMillis / MILLIS_PER_MINUTE).coerceAtLeast(1L),
-                unit = ExpiryUnit.MINUTE
-            )
-        }
+        return ExpiryCountdown.Remaining(resolveCountdownDuration(remainingMillis))
     }
 
     /**
@@ -89,6 +76,24 @@ internal object PlanUsageFormatter {
         val endTimeMillis = parseServerTimeMillis(serverTime) ?: return false
         val remainingMillis = endTimeMillis - nowMillis
         return remainingMillis > 0L && remainingMillis <= EXPIRY_WARNING_WINDOW_MILLIS
+    }
+
+    /**
+     * 将周额度重置时间转换为两天内的天/小时/分钟倒计时；已重置、时间缺失或距离超过两天时不提醒。
+     * @param serverTime 服务端返回的周额度窗口结束时间
+     * @param nowMillis 当前时间，默认使用设备当前时间，测试时可传入固定值
+     * @return 两天内可展示的重置倒计时，否则返回 null
+     */
+    fun resolveWeekResetCountdown(
+        serverTime: String?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ResetCountdown? {
+        val endTimeMillis = parseServerTimeMillis(serverTime) ?: return null
+        val remainingMillis = endTimeMillis - nowMillis
+        if (remainingMillis <= 0L || remainingMillis > WEEK_RESET_WARNING_WINDOW_MILLIS) {
+            return null
+        }
+        return ResetCountdown.Remaining(resolveCountdownDuration(remainingMillis))
     }
 
     /**
@@ -206,23 +211,40 @@ internal object PlanUsageFormatter {
         return if (includeZoneLabel) "$formattedDate 北京时间" else formattedDate
     }
 
-    /** 到期倒计时的单位，供展示层选择对应的本地化文案。 */
-    enum class ExpiryUnit {
-        DAY,
-        HOUR,
-        MINUTE
+    /** 将未来毫秒数拆成天、小时和分钟，保留告警文案需要的次级单位。 */
+    private fun resolveCountdownDuration(remainingMillis: Long): CountdownDuration {
+        val totalMinutes = (remainingMillis / MILLIS_PER_MINUTE).coerceAtLeast(1L)
+        return CountdownDuration(
+            days = totalMinutes / MINUTES_PER_DAY,
+            hours = (totalMinutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR,
+            minutes = totalMinutes % MINUTES_PER_HOUR
+        )
     }
+
+    /** 倒计时的组合单位，供到期和周额度重置告警共用。 */
+    data class CountdownDuration(
+        val days: Long,
+        val hours: Long,
+        val minutes: Long
+    )
 
     /** 套餐到期倒计时结果，区分已到期和仍有剩余时间。 */
     sealed interface ExpiryCountdown {
         /** 服务端到期时间已早于当前时间。 */
         object Expired : ExpiryCountdown
 
-        /** 套餐仍有效，amount 使用 unit 对应的整数单位。 */
+        /** 套餐仍有效，duration 保留天、小时和分钟三个单位。 */
         data class Remaining(
-            val amount: Long,
-            val unit: ExpiryUnit
+            val duration: CountdownDuration
         ) : ExpiryCountdown
+    }
+
+    /** 周额度重置倒计时结果，仅承载两天提醒窗口内的未来时间。 */
+    sealed interface ResetCountdown {
+        /** 周额度仍未重置，duration 保留天、小时和分钟三个单位。 */
+        data class Remaining(
+            val duration: CountdownDuration
+        ) : ResetCountdown
     }
 
     private const val MASK_KEY_SHORT_LENGTH = 15
@@ -237,6 +259,7 @@ internal object PlanUsageFormatter {
     private const val MILLIS_PER_HOUR = 60L * MILLIS_PER_MINUTE
     private const val MILLIS_PER_DAY = 24L * MILLIS_PER_HOUR
     private const val EXPIRY_WARNING_WINDOW_MILLIS = 8L * MILLIS_PER_DAY
+    private const val WEEK_RESET_WARNING_WINDOW_MILLIS = 2L * MILLIS_PER_DAY
     private const val MINUTES_PER_HOUR = 60L
     private const val MINUTES_PER_DAY = 24L * MINUTES_PER_HOUR
     private const val MINUTES_PER_WEEK = 7L * MINUTES_PER_DAY

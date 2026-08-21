@@ -200,11 +200,14 @@
     <string name="plan_usage_window_end">%1$s窗口结束</string>
     <string name="plan_usage_week_window_end_value">%1$s（每周%2$s重置）</string>
     <string name="plan_usage_quota_title">%1$s额度</string>
-    <string name="plan_usage_plan_with_expiry">%1$s（%2$s）</string>
-    <string name="plan_usage_plan_expiry_days">%1$d天后到期</string>
-    <string name="plan_usage_plan_expiry_hours">%1$d小时后到期</string>
+    <string name="plan_usage_plan_with_alert">%1$s（%2$s）</string>
+    <string name="plan_usage_plan_expiry_days_hours">%1$d天%2$d小时后到期</string>
+    <string name="plan_usage_plan_expiry_hours_minutes">%1$d小时%2$d分钟后到期</string>
     <string name="plan_usage_plan_expiry_minutes">%1$d分钟后到期</string>
     <string name="plan_usage_plan_expired">已到期</string>
+    <string name="plan_usage_plan_reset_days_hours">%1$d天%2$d小时后重置</string>
+    <string name="plan_usage_plan_reset_hours_minutes">%1$d小时%2$d分钟后重置</string>
+    <string name="plan_usage_plan_reset_minutes">%1$d分钟后重置</string>
     <string name="plan_usage_last_check">本次检查</string>
     <string name="plan_usage_last_update">上次更新</string>
     <string name="plan_usage_last_valid_data">最后有效数据</string>

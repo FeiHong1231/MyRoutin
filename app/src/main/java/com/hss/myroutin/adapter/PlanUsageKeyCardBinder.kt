@@ -23,6 +23,7 @@ import kotlin.math.roundToInt
  * 说明：订阅 Key 卡片展示绑定器，集中处理卡片状态、额度、倍率样式和进度日志，不参与列表生命周期。
  *
  * @param onTogglePlanKey 展开或收起当前 Key 的交互回调
+ * @param onRefreshPlanKey 刷新当前 Key 的交互回调
  * @param onManagePlanKey 打开当前 Key 管理入口的交互回调
  * @param onCopyPlanKey 将当前完整 Key 写入系统剪贴板的交互回调
  * @作者 huangssh
@@ -30,6 +31,7 @@ import kotlin.math.roundToInt
  */
 internal class PlanUsageKeyCardBinder(
     private val onTogglePlanKey: (String) -> Unit,
+    private val onRefreshPlanKey: (String) -> Unit,
     private val onManagePlanKey: (View, SavedPlanKey) -> Unit,
     private val onCopyPlanKey: (SavedPlanKey) -> Unit
 ) {
@@ -50,45 +52,74 @@ internal class PlanUsageKeyCardBinder(
         tvKeyName.text = planKey.name
         tvMaskedKey.text = PlanUsageFormatter.maskKey(planKey.apiKey)
         tvKeyRefreshing.visibility = if (isRefreshing) View.VISIBLE else View.INVISIBLE
-        tvToggle.text = root.context.getString(
-            if (planKey.isExpanded) R.string.action_collapse else R.string.action_expand
-        )
+        tvRefresh.text = root.context.getString(R.string.action_refresh)
         bindStatusMessage(tvStatusMessage, planKey, latestError)
         llKeyDetails.visibility = if (planKey.isExpanded) View.VISIBLE else View.GONE
-        pbCollapsedWeekQuotaProgress.visibility = View.GONE
+        resetCollapsedQuotaVisibility(cardBinding)
         llKeyHeader.setOnClickListener { onTogglePlanKey(planKey.id) }
-        tvToggle.setOnClickListener { onTogglePlanKey(planKey.id) }
+        tvRefresh.setOnClickListener { onRefreshPlanKey(planKey.id) }
         tvManage.setOnClickListener { onManagePlanKey(tvManage, planKey) }
         btnCopyKey.setOnClickListener { onCopyPlanKey(planKey) }
         if (planKey.isExpanded) {
             bindPlanKeyDetails(cardBinding, planKey)
         } else {
-            bindCollapsedWeekQuotaProgress(cardBinding, planKey)
+            bindCollapsedQuotaProgress(cardBinding, planKey)
         }
     }
 
     /**
-     * 收起态只展示周额度已用比例，缺少有效周额度时保持该区域隐藏。
+     * 收起态按接口的短窗口字段展示五小时额度，再展示周额度；缺少对应数据的进度条保持隐藏。
      * @param cardBinding 收起卡片的固定 XML 节点
      * @param planKey 当前 Key 及其本地缓存
      */
-    private fun bindCollapsedWeekQuotaProgress(
+    private fun bindCollapsedQuotaProgress(
         cardBinding: ItemPlanUsageKeyBinding,
         planKey: SavedPlanKey
     ) {
         val usage = planKey.cachedUsage ?: return
-        val quotaResult = PlanUsageQuotaCalculator.calculateCycleQuota(
+        val shortQuotaResult = PlanUsageQuotaCalculator.calculateCycleQuota(
+            usedUsd = usage.dailyUsedUsd,
+            limitUsd = usage.dailyLimitUsd,
+            remainingUsd = usage.dailyRemainingUsd
+        )
+        val weekQuotaResult = PlanUsageQuotaCalculator.calculateCycleQuota(
             usedUsd = usage.weeklyUsedUsd,
             limitUsd = usage.weeklyLimitUsd,
             remainingUsd = usage.weeklyRemainingUsd
         )
-        val usedRate = quotaResult.usedRate ?: return
-        updateProgressBar(
-            cardBinding.pbCollapsedWeekQuotaProgress,
-            usedRate,
-            quotaResult.isWarning
-        )
-        cardBinding.pbCollapsedWeekQuotaProgress.visibility = View.VISIBLE
+        val hasShortQuota = shortQuotaResult.usedRate != null
+        val hasWeekQuota = weekQuotaResult.usedRate != null
+        if (!hasShortQuota && !hasWeekQuota) {
+            return
+        }
+        if (hasShortQuota) {
+            updateProgressBar(
+                cardBinding.pbCollapsedDayQuotaProgress,
+                shortQuotaResult.usedRate,
+                shortQuotaResult.isWarning
+            )
+            cardBinding.tvCollapsedDayQuotaLabel.visibility = View.VISIBLE
+            cardBinding.pbCollapsedDayQuotaProgress.visibility = View.VISIBLE
+        }
+        if (hasWeekQuota) {
+            updateProgressBar(
+                cardBinding.pbCollapsedWeekQuotaProgress,
+                weekQuotaResult.usedRate,
+                weekQuotaResult.isWarning
+            )
+            cardBinding.tvCollapsedWeekQuotaLabel.visibility = View.VISIBLE
+            cardBinding.pbCollapsedWeekQuotaProgress.visibility = View.VISIBLE
+        }
+        cardBinding.llCollapsedQuotaProgress.visibility = View.VISIBLE
+    }
+
+    /** 每次复用卡片前清空收起态的两条额度进度，避免上一张 Key 的数据残留。 */
+    private fun resetCollapsedQuotaVisibility(cardBinding: ItemPlanUsageKeyBinding) = with(cardBinding) {
+        llCollapsedQuotaProgress.visibility = View.GONE
+        tvCollapsedDayQuotaLabel.visibility = View.GONE
+        pbCollapsedDayQuotaProgress.visibility = View.GONE
+        tvCollapsedWeekQuotaLabel.visibility = View.GONE
+        pbCollapsedWeekQuotaProgress.visibility = View.GONE
     }
 
     /**

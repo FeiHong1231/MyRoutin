@@ -41,6 +41,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
+            android:minHeight="48dp"
             android:orientation="horizontal">
 
             <TextView
@@ -63,31 +64,16 @@
                 android:visibility="gone"
                 tools:text="刷新中 1/2"
                 tools:visibility="visible" />
-        </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:orientation="horizontal">
-
-            <Button
+            <ImageButton
                 android:id="@+id/btnAddKey"
-                android:layout_width="0dp"
-                android:layout_height="46dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:text="@string/action_add_key"
-                android:textAllCaps="false" />
-
-            <Button
-                android:id="@+id/btnRefreshAll"
-                android:layout_width="0dp"
-                android:layout_height="46dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:text="@string/action_refresh_all"
-                android:textAllCaps="false" />
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/action_add_key"
+                android:padding="12dp"
+                android:src="@drawable/ic_plan_usage_add"
+                app:tint="@color/plan_usage_brand_primary" />
         </LinearLayout>
 
         <include

@@ -26,9 +26,12 @@ internal class PlanUsagePageRenderer(
     fun render(state: PlanUsageUiState) {
         val context = binding.root.context
         val isLocalDataReady = !state.isLoadingLocalData
+        val isRefreshingAnyKey = state.refreshingKeyIds.isNotEmpty()
         val canPullToRefresh = isLocalDataReady &&
             state.planKeys.isNotEmpty() &&
-            !state.isAddingKey
+            !state.isAddingKey &&
+            !state.isRefreshingAll &&
+            !isRefreshingAnyKey
         binding.swipeRefreshPlanUsage.isEnabled = canPullToRefresh
         binding.swipeRefreshPlanUsage.isRefreshing = state.isRefreshingAll
         binding.tvKeyCount.text = context.getString(R.string.plan_usage_key_count, state.planKeys.size)
@@ -38,31 +41,30 @@ internal class PlanUsagePageRenderer(
                 state.refreshCurrentIndex,
                 state.refreshTotalCount
             )
-            !state.refreshStatusText.isNullOrBlank() -> state.refreshStatusText
             else -> null
         }
-        binding.tvRefreshStatus.visibility = if (binding.tvRefreshStatus.text.isNullOrBlank()) {
-            View.GONE
-        } else {
-            View.VISIBLE
-        }
-        binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll
-        binding.btnAddKey.text = context.getString(
+        val isShowingRefreshStatus = !binding.tvRefreshStatus.text.isNullOrBlank()
+        binding.tvRefreshStatus.visibility = if (isShowingRefreshStatus) View.VISIBLE else View.GONE
+        // 刷新状态只替换图标的可见内容，保留 48dp 占位，避免标题行高度变化造成页面跳动。
+        binding.btnAddKey.visibility = if (isShowingRefreshStatus) View.INVISIBLE else View.VISIBLE
+        binding.btnAddKey.contentDescription = context.getString(
             if (state.isAddKeyPanelVisible) R.string.action_collapse else R.string.action_add_key
         )
-        binding.btnRefreshAll.isEnabled =
-            isLocalDataReady &&
-            state.planKeys.isNotEmpty() &&
-            !state.isAddingKey &&
-            !state.isRefreshingAll
-        binding.btnRefreshAll.text = context.getString(
-            if (state.isRefreshingAll) R.string.plan_usage_refreshing else R.string.action_refresh_all
-        )
-        binding.btnQueryAndAdd.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
+        val targetAddIconRotation = if (state.isAddKeyPanelVisible) 45f else 0f
+        if (binding.btnAddKey.rotation != targetAddIconRotation) {
+            binding.btnAddKey.animate()
+                .rotation(targetAddIconRotation)
+                .setDuration(180L)
+                .start()
+        }
+        binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll && !isRefreshingAnyKey
+        binding.btnQueryAndAdd.isEnabled =
+            isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll && !isRefreshingAnyKey
         binding.btnQueryAndAdd.text = context.getString(
             if (state.isAddingKey) R.string.plan_usage_querying else R.string.action_query_and_add
         )
-        binding.btnPasteKey.isEnabled = isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll
+        binding.btnPasteKey.isEnabled =
+            isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll && !isRefreshingAnyKey
         binding.llAddKeyPanel.visibility = if (state.isAddKeyPanelVisible) View.VISIBLE else View.GONE
         binding.tvLocalDataWarning.text = state.localDataWarningMessage.orEmpty()
         binding.tvLocalDataWarning.visibility = if (state.localDataWarningMessage.isNullOrBlank()) {

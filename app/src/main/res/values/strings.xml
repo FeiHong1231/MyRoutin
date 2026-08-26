@@ -42,6 +42,7 @@
     <string name="action_query_and_add">查询并添加</string>
     <string name="action_refresh_all">刷新全部</string>
     <string name="action_refresh">刷新</string>
+    <string name="plan_usage_refresh_key">刷新当前 Key</string>
 
     <string name="daily_check_in_title">每日签到</string>
     <string name="plan_subscription_title">套餐订阅</string>
@@ -68,6 +69,8 @@
     <string name="plan_usage_api_key_hint">请输入 plan- 开头的 apikey</string>
     <string name="plan_usage_empty_hint">添加 Key 后可集中查看各订阅的额度和到期时间</string>
     <string name="plan_usage_card_refreshing">正在刷新...</string>
+    <string name="plan_usage_five_hour_quota">五小时额度</string>
+    <string name="plan_usage_week_quota">周额度</string>
     <string name="plan_usage_cycle_title">周期订阅</string>
     <string name="plan_usage_resource_title">资源包套餐</string>
     <string name="plan_usage_no_quota_hint">暂无可展示额度</string>

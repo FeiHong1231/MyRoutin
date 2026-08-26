@@ -75,7 +75,7 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun toggleAddKeyPanel() {
         updateUiState { state ->
-            if (state.isLoadingLocalData || state.isRefreshingAll) {
+            if (state.isLoadingLocalData || state.isRefreshingAll || state.refreshingKeyIds.isNotEmpty()) {
                 state
             } else {
                 state.copy(isAddKeyPanelVisible = !state.isAddKeyPanelVisible)
@@ -91,7 +91,12 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
     fun queryAndAddPlanKey(rawName: String, rawApiKey: String) {
         val apiKey = rawApiKey.trim()
         val state = _uiState.value
-        if (state.isLoadingLocalData || state.isAddingKey || state.isRefreshingAll) {
+        if (
+            state.isLoadingLocalData ||
+            state.isAddingKey ||
+            state.isRefreshingAll ||
+            state.refreshingKeyIds.isNotEmpty()
+        ) {
             return
         }
         if (apiKey.isBlank()) {
@@ -170,7 +175,8 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             currentState.isLoadingLocalData ||
             currentState.isAddingKey ||
             savedPlanKeys.isEmpty() ||
-            currentState.isRefreshingAll
+            currentState.isRefreshingAll ||
+            currentState.refreshingKeyIds.isNotEmpty()
         ) {
             return
         }
@@ -213,8 +219,46 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
             updateUiState {
                 it.copy(
                     isRefreshingAll = false,
-                    refreshStatusText = getString(R.string.plan_usage_refreshed_count, refreshQueue.size)
+                    refreshStatusText = null
                 )
+            }
+        }
+    }
+
+    /**
+     * 只刷新指定 Key，保留其他卡片当前的额度和展开状态。
+     * @param keyId 要重新查询的 Key 唯一标识
+     */
+    fun refreshPlanKey(keyId: String) {
+        val currentState = _uiState.value
+        if (
+            currentState.isLoadingLocalData ||
+            currentState.isAddingKey ||
+            currentState.isRefreshingAll ||
+            keyId in currentState.refreshingKeyIds
+        ) {
+            return
+        }
+        val planKey = savedPlanKeys.firstOrNull { it.id == keyId } ?: return
+        updateUiState {
+            it.copy(
+                refreshingKeyIds = it.refreshingKeyIds + keyId,
+                refreshStatusText = null
+            )
+        }
+        viewModelScope.launch {
+            var hasPersistentChanges = false
+            try {
+                val requestTrace = "[刷新当前 Key] ${planKey.name}"
+                val result = repository.queryPlanUsage(planKey.apiKey, requestTrace)
+                hasPersistentChanges = applyRefreshResult(keyId, result)
+            } finally {
+                if (hasPersistentChanges) {
+                    schedulePlanKeysPersistence()
+                }
+                publishPlanKeys { state ->
+                    state.copy(refreshingKeyIds = state.refreshingKeyIds - keyId)
+                }
             }
         }
     }

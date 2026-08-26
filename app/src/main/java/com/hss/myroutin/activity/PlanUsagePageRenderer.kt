@@ -45,8 +45,8 @@ internal class PlanUsagePageRenderer(
         }
         val isShowingRefreshStatus = !binding.tvRefreshStatus.text.isNullOrBlank()
         binding.tvRefreshStatus.visibility = if (isShowingRefreshStatus) View.VISIBLE else View.GONE
-        // 刷新状态只替换图标的可见内容，保留 48dp 占位，避免标题行高度变化造成页面跳动。
-        binding.btnAddKey.visibility = if (isShowingRefreshStatus) View.INVISIBLE else View.VISIBLE
+        // 刷新状态彻底移除加号，但标题行的最小高度继续稳定布局，避免页面抖动。
+        binding.btnAddKey.visibility = if (isShowingRefreshStatus) View.GONE else View.VISIBLE
         binding.btnAddKey.contentDescription = context.getString(
             if (state.isAddKeyPanelVisible) R.string.action_collapse else R.string.action_add_key
         )

@@ -4,6 +4,7 @@ import com.hss.myroutin.model.PlanUsageLegacyPeriod
 import com.hss.myroutin.model.PlanUsageQueryStatus
 import com.hss.myroutin.model.PlanUsageSnapshot
 import com.hss.myroutin.model.SavedPlanKey
+import com.hss.myroutin.model.WeeklyResetStats
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,6 +30,7 @@ internal object SavedPlanKeyJsonCodec {
                     putNullable("lastUpdatedAt", key.lastUpdatedAt)
                     putNullable("cachedUsage", key.cachedUsage?.let(PlanUsageSnapshotJsonCodec::encode))
                     putNullable("legacyPeriod", key.legacyPeriod?.toJsonObject())
+                    putNullable("weeklyResetStats", key.weeklyResetStats?.toJsonObject())
                     putNullable("lastCheckedAt", key.lastCheckedAt)
                     put("queryStatus", key.queryStatus.name)
                 })
@@ -96,6 +98,7 @@ internal object SavedPlanKeyJsonCodec {
             lastUpdatedAt = lastUpdatedAt,
             cachedUsage = cachedUsage,
             legacyPeriod = legacyPeriod,
+            weeklyResetStats = optJSONObject("weeklyResetStats")?.toWeeklyResetStats(),
             // 旧缓存没有检查时间时沿用原更新时间，保证升级后仍能说明数据新旧。
             lastCheckedAt = longOrNull("lastCheckedAt") ?: lastUpdatedAt,
             queryStatus = resolveStoredPlanUsageQueryStatus(
@@ -140,6 +143,37 @@ internal object SavedPlanKeyJsonCodec {
             putNullable("weekWindowStartAt", weekWindowStartAt)
             putNullable("weekWindowEndAt", weekWindowEndAt)
         }
+    }
+
+    /** 将本周 Reset 估算写入与 Key 同一份加密 JSON。 */
+    private fun WeeklyResetStats.toJsonObject(): JSONObject {
+        return JSONObject().apply {
+            putNullable("windowStartAt", windowStartAt)
+            putNullable("windowEndAt", windowEndAt)
+            put("restoredUsd", restoredUsd)
+            put("totalRestoredUsd", totalRestoredUsd)
+            put("resetCount", resetCount)
+            put("totalResetCount", totalResetCount)
+            putNullable("lastObservedAt", lastObservedAt)
+        }
+    }
+
+    /** 旧缓存没有统计字段时返回空值，下一次成功刷新只建立基线。 */
+    private fun JSONObject.toWeeklyResetStats(): WeeklyResetStats? {
+        val startAt = stringOrNull("windowStartAt")
+        val endAt = stringOrNull("windowEndAt")
+        if (startAt == null && endAt == null) return null
+        return WeeklyResetStats(
+            windowStartAt = startAt,
+            windowEndAt = endAt,
+            restoredUsd = doubleOrNull("restoredUsd")?.coerceAtLeast(0.0) ?: 0.0,
+            totalRestoredUsd = doubleOrNull("totalRestoredUsd")
+                ?.coerceAtLeast(0.0)
+                ?: (doubleOrNull("restoredUsd")?.coerceAtLeast(0.0) ?: 0.0),
+            resetCount = optInt("resetCount", 0).coerceAtLeast(0),
+            totalResetCount = optInt("totalResetCount", 0).coerceAtLeast(0),
+            lastObservedAt = longOrNull("lastObservedAt")
+        )
     }
 
     /** 任一旧字段存在都需要回写，防止后续版本继续依赖分散字段。 */

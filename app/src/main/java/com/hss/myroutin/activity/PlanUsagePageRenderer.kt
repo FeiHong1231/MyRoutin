@@ -1,5 +1,6 @@
 package com.hss.myroutin.activity
 
+import android.content.pm.ApplicationInfo
 import android.view.View
 import com.hss.myroutin.R
 import com.hss.myroutin.adapter.PlanUsageKeyAdapter
@@ -58,6 +59,9 @@ internal class PlanUsagePageRenderer(
                 .start()
         }
         binding.btnAddKey.isEnabled = isLocalDataReady && !state.isRefreshingAll && !isRefreshingAnyKey
+        val isDebuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        binding.btnFakeWeeklyReset.visibility = if (isDebuggable) View.VISIBLE else View.GONE
+        binding.btnFakeWeeklyReset.isEnabled = canPullToRefresh
         binding.btnQueryAndAdd.isEnabled =
             isLocalDataReady && !state.isAddingKey && !state.isRefreshingAll && !isRefreshingAnyKey
         binding.btnQueryAndAdd.text = context.getString(

@@ -521,6 +521,34 @@
                 android:textSize="13sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/llWeeklyResetStats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvWeeklyResetStatsLabel"
+                android:layout_width="94dp"
+                android:layout_height="wrap_content"
+                android:text="@string/plan_usage_label_weekly_reset"
+                android:textColor="@color/plan_usage_text_secondary"
+                android:textSize="13sp"
+                android:singleLine="true" />
+
+            <TextView
+                android:id="@+id/tvWeeklyResetStatsValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/plan_usage_text_primary"
+                android:textSize="13sp"
+                tools:text="+$280.00" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/tvResourceTitle"
             android:layout_width="match_parent"

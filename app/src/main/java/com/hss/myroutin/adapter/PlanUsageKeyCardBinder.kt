@@ -282,6 +282,7 @@ internal class PlanUsageKeyCardBinder(
                 context.getString(R.string.plan_usage_window_end, weekWindowLabel),
                 formatWeekWindowEndValue(context, usage.weekWindowEndAt)
             )
+            bindWeeklyResetStats(cardBinding, planKey)
         }
         if (usage.hasResourceUsage()) {
             cardBinding.tvResourceTitle.visibility = View.VISIBLE
@@ -376,6 +377,7 @@ internal class PlanUsageKeyCardBinder(
         llWeekQuotaEstimate.visibility = View.GONE
         llCycleWindowEndFirst.visibility = View.GONE
         llCycleWindowEndSecond.visibility = View.GONE
+        llWeeklyResetStats.visibility = View.GONE
         tvResourceTitle.visibility = View.GONE
         llTokenQuota.visibility = View.GONE
         tvNoQuotaHint.visibility = View.GONE
@@ -512,6 +514,27 @@ internal class PlanUsageKeyCardBinder(
                 PlanUsageFormatter.formatLocalTime(it, includeZoneLabel = false)
             }
                 ?: cardBinding.root.context.getString(R.string.plan_usage_not_queried)
+        )
+    }
+
+    /** 仅显示当前周窗口内估算出的 Reset 额度，没有有效差值时整行隐藏。 */
+    private fun bindWeeklyResetStats(
+        cardBinding: ItemPlanUsageKeyBinding,
+        planKey: SavedPlanKey
+    ) {
+        val stats = planKey.weeklyResetStats ?: return
+        if (stats.restoredUsd <= 0.0) return
+        val context = cardBinding.root.context
+        bindDetailRow(
+            cardBinding.llWeeklyResetStats,
+            cardBinding.tvWeeklyResetStatsLabel,
+            cardBinding.tvWeeklyResetStatsValue,
+            context.getString(R.string.plan_usage_label_weekly_reset),
+            context.getString(
+                R.string.plan_usage_weekly_reset_value,
+                PlanUsageFormatter.formatUsd(stats.restoredUsd),
+                stats.resetCount
+            )
         )
     }
 

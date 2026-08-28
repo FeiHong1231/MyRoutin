@@ -19,6 +19,8 @@ data class SavedPlanKey(
     val cachedUsage: PlanUsageSnapshot? = null,
     /** 仅承接旧版本已经丢失额度快照但仍保留的周期时间，新有效快照会清除此对象。 */
     val legacyPeriod: PlanUsageLegacyPeriod? = null,
+    /** 当前服务端周窗口内按刷新差值估算获得的 Reset 额度。 */
+    val weeklyResetStats: WeeklyResetStats? = null,
     /** 最近一次得到确定业务结果的时间，包含有效快照、订阅过期和 Key 失效。 */
     val lastCheckedAt: Long? = lastUpdatedAt,
     /** 最新一次确定的查询状态，与最后有效额度快照分开保存。 */
@@ -27,6 +29,24 @@ data class SavedPlanKey(
     } else {
         PlanUsageQueryStatus.ACTIVE
     }
+)
+
+/**
+ * 说明：保存单个 Key 当前周窗口内估算出的 Reset 额度，窗口切换后重新建立基线。
+ *
+ * @作者 huangssh
+ * @版本 3.0
+ */
+data class WeeklyResetStats(
+    val windowStartAt: String?,
+    val windowEndAt: String?,
+    val restoredUsd: Double = 0.0,
+    val totalRestoredUsd: Double = 0.0,
+    /** 当前周窗口内已检测到的 Reset 次数，用于用量卡片展示。 */
+    val resetCount: Int = 0,
+    /** 所有周窗口累计检测到的全局 Reset 次数；同一次 Reset 不按 Key 数量重复计算。 */
+    val totalResetCount: Int = 0,
+    val lastObservedAt: Long? = null
 )
 
 /**

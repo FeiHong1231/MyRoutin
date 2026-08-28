@@ -44,7 +44,7 @@ class PlanUsageFragment : Fragment() {
 
     /** Key 列表状态仅属于用量页，页面在导航间切换时保留。 */
     private val viewModel by lazy {
-        ViewModelProvider(this).get(PlanUsageViewModel::class.java)
+        ViewModelProvider(requireActivity()).get(PlanUsageViewModel::class.java)
     }
 
     /** 更新状态与设置页共享，两处更新卡片始终显示同一进度。 */
@@ -87,6 +87,7 @@ class PlanUsageFragment : Fragment() {
         binding.rvPlanKeys.adapter = planUsageKeyAdapter
         binding.swipeRefreshPlanUsage.setColorSchemeResources(R.color.plan_usage_brand_primary)
         binding.swipeRefreshPlanUsage.setOnRefreshListener { viewModel.refreshAllPlanKeys() }
+        binding.btnFakeWeeklyReset.setOnClickListener { viewModel.simulateWeeklyReset() }
         binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }
         binding.btnQueryAndAdd.setOnClickListener { queryAndAddPlanKey() }

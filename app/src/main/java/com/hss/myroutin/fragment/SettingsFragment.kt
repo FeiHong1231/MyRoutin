@@ -23,9 +23,13 @@ import com.hss.myroutin.activity.RoutinWebActivity
 import com.hss.myroutin.appearance.AppAppearancePreference
 import com.hss.myroutin.appearance.AppearanceMode
 import com.hss.myroutin.databinding.FragmentSettingsBinding
+import com.hss.myroutin.databinding.DialogWeeklyResetStatsBinding
+import com.hss.myroutin.databinding.ItemWeeklyResetStatsKeyBinding
+import com.hss.myroutin.logic.PlanUsageFormatter
 import com.hss.myroutin.model.RoutinRecentGroup
 import com.hss.myroutin.store.RoutinRecentGroupStore
 import com.hss.myroutin.update.AppUpdateViewModel
+import com.hss.myroutin.viewmodel.PlanUsageViewModel
 import com.hss.myroutin.widget.MyToastD
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -48,6 +52,11 @@ class SettingsFragment : Fragment() {
     /** 与用量页共享更新状态，确保下载进度和安装入口始终一致。 */
     private val appUpdateViewModel by lazy {
         ViewModelProvider(requireActivity()).get(AppUpdateViewModel::class.java)
+    }
+
+    /** 与用量页共享 Key 缓存，点击统计入口时读取所有 Key 的当前累计金额。 */
+    private val planUsageViewModel by lazy {
+        ViewModelProvider(requireActivity()).get(PlanUsageViewModel::class.java)
     }
 
     /** 更新卡片复用用量页的状态映射，设置页只提供入口和容器。 */
@@ -121,6 +130,9 @@ class SettingsFragment : Fragment() {
         binding.llPlanSubscriptionSetting.setOnClickListener {
             startActivity(RoutinWebActivity.createPlanSubscriptionIntent(requireContext()))
         }
+        binding.llWeeklyResetStatsSetting.setOnClickListener {
+            showWeeklyResetStatsDialog()
+        }
         binding.updateCard.btnUpdateAction.setOnClickListener {
             (requireActivity() as PlanUsageInputActivity).handleUpdateAction()
         }
@@ -130,6 +142,59 @@ class SettingsFragment : Fragment() {
         binding.updateCard.btnDismissUpdate.setOnClickListener {
             appUpdateViewModel.dismissUpdateCard()
         }
+    }
+
+    /** 展示累计额度、全局历史 Reset 次数和逐 Key 金额明细。 */
+    private fun showWeeklyResetStatsDialog() {
+        val state = planUsageViewModel.uiState.value
+        if (state.isLoadingLocalData) {
+            MyToastD.show(getString(R.string.settings_weekly_reset_stats_loading))
+            return
+        }
+        val entries = state.planKeys.mapNotNull { planKey ->
+            val amount = planKey.weeklyResetStats?.totalRestoredUsd ?: return@mapNotNull null
+            if (amount <= 0.0) return@mapNotNull null
+            planKey.name to amount
+        }
+        val total = entries.sumOf { it.second }
+        val totalResetCount = state.planKeys
+            .mapNotNull { it.weeklyResetStats?.totalResetCount }
+            .maxOrNull()
+            ?: 0
+        val dialogBinding = DialogWeeklyResetStatsBinding.inflate(layoutInflater)
+        dialogBinding.tvTotalAmount.text = PlanUsageFormatter.formatUsd(total)
+        dialogBinding.tvTotalResetCount.text = getString(
+            R.string.settings_weekly_reset_stats_count_value,
+            totalResetCount
+        )
+        if (entries.isEmpty()) {
+            dialogBinding.llKeyBreakdown.visibility = View.GONE
+            dialogBinding.tvEmpty.visibility = View.VISIBLE
+        } else {
+            dialogBinding.llKeyBreakdown.visibility = View.VISIBLE
+            dialogBinding.tvEmpty.visibility = View.GONE
+            entries.forEach { (name, amount) ->
+                val rowBinding = ItemWeeklyResetStatsKeyBinding.inflate(
+                    layoutInflater,
+                    dialogBinding.llKeyBreakdown,
+                    false
+                )
+                rowBinding.tvKeyName.text = name
+                rowBinding.tvKeyAmount.text = PlanUsageFormatter.formatUsd(amount)
+                dialogBinding.llKeyBreakdown.addView(rowBinding.root)
+            }
+        }
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogBinding.root)
+            .create()
+        dialogBinding.btnClose.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+        val maxDialogWidth = (resources.displayMetrics.density * 520).toInt()
+        val preferredDialogWidth = (resources.displayMetrics.widthPixels * 0.92f).toInt()
+        dialog.window?.setLayout(
+            minOf(maxDialogWidth, preferredDialogWidth),
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT
+        )
     }
 
     /** 设置页可见时同步更新卡片，手动检查期间禁止重复点击。 */

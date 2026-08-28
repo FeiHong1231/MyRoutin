@@ -532,8 +532,7 @@ internal class PlanUsageKeyCardBinder(
             context.getString(R.string.plan_usage_label_weekly_reset),
             context.getString(
                 R.string.plan_usage_weekly_reset_value,
-                PlanUsageFormatter.formatUsd(stats.restoredUsd),
-                stats.resetCount
+                PlanUsageFormatter.formatUsd(stats.restoredUsd)
             )
         )
     }

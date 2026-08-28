@@ -50,7 +50,6 @@
     <string name="action_paste">粘贴</string>
     <string name="action_query_and_add">查询并添加</string>
     <string name="action_refresh_all">刷新全部</string>
-    <string name="action_fake_weekly_reset">模拟 Reset</string>
     <string name="action_refresh">刷新</string>
     <string name="plan_usage_refresh_key">刷新当前 Key</string>
 
@@ -72,8 +71,6 @@
     <string name="plan_usage_key_count_empty">我的 Key（0）</string>
     <string name="plan_usage_key_count">我的 Key（%1$d）</string>
     <string name="plan_usage_refresh_progress">刷新中 %1$d/%2$d</string>
-    <string name="plan_usage_fake_reset_done">已模拟 Reset，列表额度已恢复</string>
-    <string name="plan_usage_fake_reset_empty">没有可模拟 Reset 的有效周额度</string>
     <string name="plan_usage_refreshing">刷新中...</string>
     <string name="plan_usage_querying">查询中...</string>
     <string name="plan_usage_add_panel_title">添加订阅 Key</string>
@@ -214,8 +211,8 @@
     <string name="plan_usage_label_group_multipliers">分组倍率</string>
     <string name="plan_usage_window_end">%1$s窗口结束</string>
     <string name="plan_usage_week_window_end_value">%1$s（每周%2$s重置）</string>
-    <string name="plan_usage_label_weekly_reset">本周Reset额度</string>
-    <string name="plan_usage_weekly_reset_value">+%1$s（本周已重置%2$d次）</string>
+    <string name="plan_usage_label_weekly_reset">本周 Reset 额度</string>
+    <string name="plan_usage_weekly_reset_value">+%1$s</string>
     <string name="plan_usage_quota_title">%1$s额度</string>
     <string name="plan_usage_plan_with_alert">%1$s（%2$s）</string>
     <string name="plan_usage_plan_expiry_days_hours">%1$d天%2$d小时后到期</string>

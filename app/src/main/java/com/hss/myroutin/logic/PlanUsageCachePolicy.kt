@@ -17,13 +17,11 @@ internal object PlanUsageCachePolicy {
      * @param planKey 查询前的完整 Key 缓存
      * @param usage 本次接口返回的非空用量快照
      * @param checkedAt 本次得到确定结果的时间
-     * @param bypassNaturalResetGuard 是否跳过自然周边界保护，仅供 Debug 模拟入口使用
      */
     fun applyAvailableUsage(
         planKey: SavedPlanKey,
         usage: PlanUsageSnapshot,
-        checkedAt: Long,
-        bypassNaturalResetGuard: Boolean = false
+        checkedAt: Long
     ): SavedPlanKey {
         return planKey.copy(
             lastUpdatedAt = checkedAt,
@@ -35,8 +33,7 @@ internal object PlanUsageCachePolicy {
                 },
                 previousStats = planKey.weeklyResetStats,
                 currentUsage = usage,
-                observedAt = checkedAt,
-                bypassNaturalResetGuard = bypassNaturalResetGuard
+                observedAt = checkedAt
             ),
             lastCheckedAt = checkedAt,
             queryStatus = PlanUsageQueryStatus.ACTIVE

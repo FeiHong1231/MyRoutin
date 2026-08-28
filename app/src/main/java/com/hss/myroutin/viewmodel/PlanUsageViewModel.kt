@@ -1,14 +1,12 @@
 package com.hss.myroutin.viewmodel
 
 import android.app.Application
-import android.content.pm.ApplicationInfo
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hss.myroutin.R
 import com.hss.myroutin.logic.PlanUsageCachePolicy
 import com.hss.myroutin.model.SavedPlanKey
-import com.hss.myroutin.model.PlanUsageQueryStatus
 import com.hss.myroutin.repository.PlanUsageQueryError
 import com.hss.myroutin.repository.PlanUsageQueryResult
 import com.hss.myroutin.repository.PlanUsageRepository
@@ -261,56 +259,6 @@ class PlanUsageViewModel(application: Application) : AndroidViewModel(applicatio
                 publishPlanKeys { state ->
                     state.copy(refreshingKeyIds = state.refreshingKeyIds - keyId)
                 }
-            }
-        }
-    }
-
-    /**
-     * Debug 构建用的本地 Reset 模拟：将所有有效 Key 的周额度恢复到上限，并复用真实差值统计。
-     * 该操作不发起网络请求，只用于验证用量列表和设置页的统计展示。
-     */
-    fun simulateWeeklyReset() {
-        val application = getApplication<Application>()
-        if (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
-        if (
-            !_uiState.value.isLoadingLocalData &&
-            !_uiState.value.isAddingKey &&
-            !_uiState.value.isRefreshingAll &&
-            _uiState.value.refreshingKeyIds.isEmpty()
-        ) {
-            val checkedAt = System.currentTimeMillis()
-            var changed = false
-            savedPlanKeys.indices.forEach { index ->
-                val planKey = savedPlanKeys[index]
-                if (planKey.queryStatus != PlanUsageQueryStatus.ACTIVE) {
-                    return@forEach
-                }
-                val usage = planKey.cachedUsage ?: return@forEach
-                val limit = usage.weeklyLimitUsd?.takeIf { it.isFinite() && it > 0.0 }
-                    ?: return@forEach
-                val simulatedUsage = usage.copy(
-                    weeklyUsedUsd = 0.0,
-                    weeklyRemainingUsd = limit
-                )
-                val updatedKey = PlanUsageCachePolicy.applyAvailableUsage(
-                    planKey = planKey,
-                    usage = simulatedUsage,
-                    checkedAt = checkedAt,
-                    bypassNaturalResetGuard = true
-                )
-                val previousTotal = planKey.weeklyResetStats?.totalRestoredUsd ?: 0.0
-                val updatedTotal = updatedKey.weeklyResetStats?.totalRestoredUsd ?: 0.0
-                if (updatedTotal > previousTotal) {
-                    savedPlanKeys[index] = updatedKey
-                    changed = true
-                }
-            }
-            if (changed) {
-                schedulePlanKeysPersistence()
-                publishPlanKeys()
-                sendEvent(PlanUsageUiEvent.ShowToast(getString(R.string.plan_usage_fake_reset_done)))
-            } else {
-                sendEvent(PlanUsageUiEvent.ShowToast(getString(R.string.plan_usage_fake_reset_empty)))
             }
         }
     }

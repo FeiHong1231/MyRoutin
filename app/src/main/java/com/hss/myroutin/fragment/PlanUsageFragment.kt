@@ -87,7 +87,6 @@ class PlanUsageFragment : Fragment() {
         binding.rvPlanKeys.adapter = planUsageKeyAdapter
         binding.swipeRefreshPlanUsage.setColorSchemeResources(R.color.plan_usage_brand_primary)
         binding.swipeRefreshPlanUsage.setOnRefreshListener { viewModel.refreshAllPlanKeys() }
-        binding.btnFakeWeeklyReset.setOnClickListener { viewModel.simulateWeeklyReset() }
         binding.btnAddKey.setOnClickListener { toggleAddKeyPanel() }
         binding.btnPasteKey.setOnClickListener { pasteApiKeyFromClipboard() }
         binding.btnQueryAndAdd.setOnClickListener { queryAndAddPlanKey() }
